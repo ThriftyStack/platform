@@ -37,6 +37,12 @@ def chain_from_response(response):
             return chain.get('inlineString', chain.get('inline_string'))
     raise ValueError('No active workload certificate chain')
 
+def enrolled(pod_spec):
+    # Istio 1.30+ may inject istio-proxy as a native sidecar initContainer.
+    container_names = [c['name'] for c in pod_spec.get('containers', [])]
+    init_names = [c['name'] for c in pod_spec.get('initContainers', [])]
+    return 'istio-proxy' in container_names or 'istio-proxy' in init_names
+
 def proxy_secret_dump(pod):
     # Prefer istioctl; fall back to pilot-agent when istioctl is absent.
     try:
@@ -95,13 +101,19 @@ def self_test():
     assert chain_from_response(response) == pem
     response['dynamicActiveSecrets'][0]['secret']['tlsCertificate']['certificateChain'] = {'inlineString': pem}
     assert chain_from_response(response) == pem
+    snake = {'dynamic_active_secrets': [{'secret': {'tls_certificate': {'certificate_chain': {'inline_bytes': base64.b64encode(pem.encode()).decode()}, 'private_key': {'inline_bytes': 'NEVER_EXTRACT'}}}}]}
+    assert chain_from_response(snake) == pem
     try:
         chain_from_response({'dynamicActiveSecrets': []})
     except ValueError:
         pass
     else:
         raise AssertionError('Missing workload chain must fail')
+    assert enrolled({'containers': [{'name': 'istio-proxy'}], 'initContainers': []})
+    assert enrolled({'containers': [{'name': 'client'}], 'initContainers': [{'name': 'istio-proxy', 'restartPolicy': 'Always'}]})
+    assert not enrolled({'containers': [{'name': 'client'}], 'initContainers': [{'name': 'istio-init'}]})
     print('Certificate response parser: passed')
+    print('Native-sidecar enrollment detection: passed')
 
 def main():
     parser = argparse.ArgumentParser()
@@ -132,11 +144,7 @@ def main():
     if len(pods) != 1:
         raise ValueError('Exactly one qualification client is required')
     pod = pods[0]['metadata']['name']; uid = pods[0]['metadata']['uid']
-    # Istio 1.30+ on modern Kubernetes injects istio-proxy as a native sidecar
-    # (initContainer with restartPolicy=Always), not as a regular container.
-    container_names = [c['name'] for c in pods[0]['spec'].get('containers', [])]
-    init_names = [c['name'] for c in pods[0]['spec'].get('initContainers', [])]
-    if 'istio-proxy' not in container_names and 'istio-proxy' not in init_names:
+    if not enrolled(pods[0]['spec']):
         raise ValueError('Qualification client is not enrolled')
     namespaces = {n['metadata']['name']: n for n in json.loads(run('kubectl', 'get', 'namespaces', '-o', 'json'))['items']}
     for namespace in ('kube-system', 'longhorn-system', 'vault', 'crossplane-system', 'cert-manager', 'argocd', 'istio-system'):

@@ -60,6 +60,23 @@ by_name = apps.to_h { |a| [a['metadata']['name'], a] }
 order = %w[longhorn crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment]
 waves = order.map { |name| by_name.fetch(name).dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave').to_i }
 check(waves.each_cons(2).all? { |a,b| a < b }, 'Dependency waves must follow deployment order')
+def ignores?(app, group, kind)
+  (app.dig('spec', 'ignoreDifferences') || []).any? { |d| d['group'] == group && d['kind'] == kind }
+end
+check(ignores?(by_name.fetch('vault-pki'), 'vault.upbound.io', 'ProviderConfig'), 'vault-pki must ignore ProviderConfig header drift')
+check(ignores?(by_name.fetch('istio-base'), 'admissionregistration.k8s.io', 'ValidatingWebhookConfiguration'), 'istio-base must ignore validating webhook drift')
+check(ignores?(by_name.fetch('istiod'), 'admissionregistration.k8s.io', 'ValidatingWebhookConfiguration'), 'istiod must ignore validating webhook drift')
+check(ignores?(by_name.fetch('istiod'), 'admissionregistration.k8s.io', 'MutatingWebhookConfiguration'), 'istiod must ignore mutating webhook drift')
+Dir["#{ROOT}/clusters/*/overrides/**/*.yaml"].each do |path|
+  text = File.read(path)
+  check(!text.match?(/\A---\s*\{\}\s*\z/), "#{path}: reject invalid document form --- {}")
+  begin
+    doc = YAML.safe_load(text)
+  rescue Psych::SyntaxError => e
+    raise "#{path}: invalid override YAML (#{e.message})"
+  end
+  check(doc.is_a?(Hash), "#{path}: override must be a YAML mapping for Helm values")
+end
 rendered = {}
 apps.each do |app|
   check(!app.dig('metadata','finalizers'), 'No cascading application deletion')
@@ -119,6 +136,9 @@ csr = rendered.fetch('cert-manager-istio-csr')
 certificate = csr.find { |o| o['kind']=='Certificate' }
 check(certificate.dig('spec','issuerRef','name')=='vault-istio' && certificate.dig('spec','uris')==['spiffe://mgmt.thriftystack.internal/ns/istio-system/sa/istiod-service-account'], 'Istiod identity must use Vault issuer and management trust domain')
 check(certificate.dig('spec','privateKey','rotationPolicy')=='Always' && certificate.dig('spec','renewBefore')=='30m', 'Istiod certificates must rotate automatically')
+pdb = csr.find { |o| o['kind']=='PodDisruptionBudget' }
+check(pdb, 'cert-manager-istio-csr must render a PodDisruptionBudget')
+check(!(pdb.dig('spec').key?('minAvailable') && pdb.dig('spec').key?('maxUnavailable')), 'cert-manager-istio-csr PDB must not set both minAvailable and maxUnavailable')
 istiod = rendered.fetch('istiod').find { |o| o['kind']=='Deployment' }
 env = istiod.dig('spec','template','spec','containers')[0]['env']
 check(env.any? { |e| e['name']=='ENABLE_CA_SERVER' && e['value']=='false' }, 'Istiod internal CA must be disabled')

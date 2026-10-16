@@ -1,0 +1,67 @@
+name: Ceremony promote PR
+
+'on':
+  workflow_dispatch:
+    inputs:
+      cluster:
+        description: Cluster profile ID under clusters/
+        required: true
+        default: management
+        type: string
+      stage:
+        description: Ceremony stage to enable after live gates
+        required: true
+        type: choice
+        options:
+          - vault
+          - pki
+          - certificates
+          - istio
+          - qualification
+          - enrollment
+      kube_context:
+        description: Explicit kubectl context (required when cluster.context is empty)
+        required: true
+        default: admin@management
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ceremony-promote-${{ inputs.cluster }}-${{ inputs.stage }}
+  cancel-in-progress: false
+
+jobs:
+  promote-pr:
+    name: Live gates then open PR
+    runs-on: [self-hosted, thrifty-management]
+    timeout-minutes: 30
+    env:
+      THRIFTY_CLUSTER: ${{ inputs.cluster }}
+      KUBE_CONTEXT: ${{ inputs.kube_context }}
+      KUBECONFIG: ${{ runner.temp }}/kubeconfig
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: true
+      - name: Install operator kubeconfig
+        env:
+          KUBECONFIG_SECRET: ${{ secrets.KUBECONFIG }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "${KUBECONFIG_SECRET}" || { echo 'Repository secret KUBECONFIG is required'; exit 1; }
+          printf '%s\n' "${KUBECONFIG_SECRET}" > "${KUBECONFIG}"
+          chmod 600 "${KUBECONFIG}"
+      - name: Configure git identity for the promote commit
+        run: |
+          set -euo pipefail
+          git config user.name "thrifty-ceremony[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Open promote PR after live gates
+        run: |
+          set -euo pipefail
+          make promote-pr STAGE="${{ inputs.stage }}"
