@@ -11,7 +11,7 @@ pkiClusters: []
 # The management App-of-Apps is the hub. Credentials exist only in Argo registration Secrets.
 fleet:
   enabled: true
-  repository: https://github.com/sudoceohq/argocd.git
+  repository: https://github.com/sudoceohq/platform.git
   applicationsRepository: https://github.com/sudoceohq/applications.git
   revision: main
 # Explicit security approvals; adding a Git profile does not grant destination access.

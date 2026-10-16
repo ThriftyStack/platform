@@ -12,7 +12,7 @@ metadata:
 spec:
   project: {{ $.Values.cluster.id }}
   source:
-    repoURL: https://github.com/sudoceohq/argocd.git
+    repoURL: https://github.com/sudoceohq/platform.git
     targetRevision: main
     helm:
       releaseName: {{ .releaseName }}

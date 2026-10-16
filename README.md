@@ -6,7 +6,7 @@ Workload Helm charts live in a separate repository: [`sudoceohq/applications`](h
 
 | Repository | Owns |
 |------------|------|
-| `sudoceohq/argocd` (this repo) | `infrastructure/`, `charts/cluster-apps`, `clusters/`, promotion/validation ops |
+| `sudoceohq/platform` (this repo) | `infrastructure/`, `charts/cluster-apps`, `clusters/`, promotion/validation ops |
 | `sudoceohq/applications` | Workload charts under `charts/<name>/` and per-cluster values under `clusters/<id>/` |
 
 ## Layout

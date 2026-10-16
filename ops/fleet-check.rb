@@ -82,7 +82,7 @@ workload_project=workload.find { |o| o['kind']=='AppProject' && o.dig('metadata'
 check(workload_project.dig('spec','sourceRepos')==[fleet_values['applicationsRepository']], 'Workload projects source only the applications repository')
 check(workload_project.dig('spec','clusterResourceWhitelist')==[], 'Workload projects grant no cluster-scoped resources')
 check(workload_project.dig('spec','destinations').none? { |d| d['namespace']=='argocd' }, 'Workload projects must not destination the hub argocd namespace')
-[['workloadProjects.demo-app.namespaces={argocd}','argocd namespace'],['workloadProjects.demo-app.server=https://*','wildcard API'],['fleet.applicationsRepository=https://github.com/sudoceohq/argocd.git','same as platform repo']].each do |flag, reason|
+[['workloadProjects.demo-app.namespaces={argocd}','argocd namespace'],['workloadProjects.demo-app.server=https://*','wildcard API'],['fleet.applicationsRepository=https://github.com/sudoceohq/platform.git','same as platform repo']].each do |flag, reason|
  _, _, status=Open3.capture3(HELM,'template','invalid-workload',CHART,*cluster_profile('management'),'--set','workloadProjects.demo-app.enabled=true','--set','workloadProjects.demo-app.server=https://kubernetes.default.svc','--set','workloadProjects.demo-app.namespaces={demo}','--set',flag)
  check(!status.success?, "Reject workload approval: #{reason}")
 end
