@@ -117,6 +117,12 @@ services:
     wave: "50"
     path: infrastructure/charts/istio-base
     namespace: istio-system
+    # istiod patches default validator caBundle after install.
+    ignoreDifferences:
+      - group: admissionregistration.k8s.io
+        kind: ValidatingWebhookConfiguration
+        jsonPointers:
+          - /webhooks
   - name: istiod
     releaseName: istiod
     stage: istio
@@ -125,6 +131,16 @@ services:
     namespace: istio-system
     valueFiles:
       - overrides/istiod.yaml
+    # istiod rewrites webhook caBundle (and related webhook fields) after sync.
+    ignoreDifferences:
+      - group: admissionregistration.k8s.io
+        kind: ValidatingWebhookConfiguration
+        jsonPointers:
+          - /webhooks
+      - group: admissionregistration.k8s.io
+        kind: MutatingWebhookConfiguration
+        jsonPointers:
+          - /webhooks
   - name: mesh-qualification
     releaseName: mesh-qualification
     stage: qualification
