@@ -2,12 +2,12 @@
 
 This repository is the **platform** Argo CD source: cluster profiles, staged infrastructure Applications, hub/spoke roots, and reviewed access projects.
 
-Workload Helm charts live in a separate repository: [`sudoceohq/applications`](https://github.com/sudoceohq/applications).
+Workload Helm charts live in a separate repository: [`ThriftyStack/applications`](https://github.com/ThriftyStack/applications).
 
 | Repository | Owns |
 |------------|------|
-| `sudoceohq/platform` (this repo) | `infrastructure/`, `charts/cluster-apps`, `clusters/`, promotion/validation ops |
-| `sudoceohq/applications` | Workload charts under `charts/<name>/` and per-cluster values under `clusters/<id>/` |
+| `ThriftyStack/platform` (this repo) | `infrastructure/`, `charts/cluster-apps`, `clusters/`, promotion/validation ops |
+| `ThriftyStack/applications` | Workload charts under `charts/<name>/` and per-cluster values under `clusters/<id>/` |
 
 ## Layout
 

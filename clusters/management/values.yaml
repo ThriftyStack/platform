@@ -11,10 +11,10 @@ pkiClusters: []
 # The management App-of-Apps is the hub. Credentials exist only in Argo registration Secrets.
 fleet:
   enabled: true
-  repository: https://github.com/sudoceohq/platform.git
-  applicationsRepository: https://github.com/sudoceohq/applications.git
+  repository: https://github.com/ThriftyStack/platform.git
+  applicationsRepository: https://github.com/ThriftyStack/applications.git
   revision: main
 # Explicit security approvals; adding a Git profile does not grant destination access.
 spokeProjects: {}
-# Workload charts live in sudoceohq/applications; enable a project only after review.
+# Workload charts live in ThriftyStack/applications; enable a project only after review.
 workloadProjects: {}
