@@ -6,7 +6,7 @@ stages:
   certificates: true
   istio: true
   qualification: true
-  enrollment: false
+  enrollment: true
 pkiClusters: []
 fleet:
   enabled: true
