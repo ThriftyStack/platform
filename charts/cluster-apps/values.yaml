@@ -78,6 +78,13 @@ services:
     wave: "10"
     path: infrastructure/configuration/vault-pki
     namespace: crossplane-system
+    # Upbound provider writes empty headers onto ProviderConfig; ignore that drift.
+    ignoreDifferences:
+      - group: vault.upbound.io
+        kind: ProviderConfig
+        jqPathExpressions:
+          - .spec.headers
+          - .spec.skip_tls_verify
   - name: cert-manager
     releaseName: cert-manager
     stage: certificates

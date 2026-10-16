@@ -28,6 +28,10 @@ spec:
   destination:
     server: {{ $.Values.cluster.server | quote }}
     namespace: {{ .namespace }}
+  {{- with .ignoreDifferences }}
+  ignoreDifferences:
+    {{- toYaml . | nindent 2 }}
+  {{- end }}
   syncPolicy:
     automated:
       prune: false

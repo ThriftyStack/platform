@@ -12,7 +12,6 @@ spec:
     source: Kubernetes
   mountPath: {{ .Values.cluster.authMount }}
   role: crossplane-pki
-  skip_tls_verify: false
   tls_server_name: {{ .Values.cluster.vaultTLSName }}
   max_lease_ttl_seconds: 600
 
