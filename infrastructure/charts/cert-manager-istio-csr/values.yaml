@@ -37,6 +37,8 @@ cert-manager-istio-csr:
   podDisruptionBudget:
     enabled: true
     minAvailable: 1
+    # Upstream chart defaults maxUnavailable: 1; both cannot be set.
+    maxUnavailable: null
   affinity:
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
