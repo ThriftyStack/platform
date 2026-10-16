@@ -1,5 +1,10 @@
 ---
 cert-manager:
+  # Keep leader-election Roles in the release namespace; management AppProject
+  # does not permit kube-system (cert-manager's default).
+  global:
+    leaderElection:
+      namespace: cert-manager
   crds:
     enabled: true
     keep: true
