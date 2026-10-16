@@ -18,7 +18,7 @@ Rules:
 - Subject in imperative mood, lowercase description, no trailing period
 - Keep the subject ≤ 72 characters
 - Group a change and everything that follows from it (code, tests, docs) into one commit
-- Body explains **why**, not what — omit lines that are obvious from the diff
+- Always include a commit body that explains **why** this was changed (motivation, constraint, or failure mode) — never restate the subject or list what the diff already shows
 - Breaking changes: `BREAKING CHANGE:` in the body, or `!` after the type/scope
 
 ```text
@@ -26,8 +26,15 @@ Rules:
 Update vault values
 Fixed stuff.
 
+feat(pki): stage remote intermediate issuance for spoke clusters
+
+Stage remote intermediate issuance for spoke clusters.
+
 # ✅ GOOD
 feat(pki): stage remote intermediate issuance for spoke clusters
+
+Spokes cannot mint workload certs until an intermediate is
+issued from management and staged for local signing.
 
 fix(istio): pin CSR signer address to the rendered service name
 
