@@ -1,20 +1,17 @@
+---
 stages:
   foundation: true
-  vault: false
+  vault: true
   pki: false
   certificates: false
   istio: false
   qualification: false
   enrollment: false
-# Add a workload cluster ID only after remote Vault auth and reviewer trust exist.
 pkiClusters: []
-# The management App-of-Apps is the hub. Credentials exist only in Argo registration Secrets.
 fleet:
   enabled: true
   repository: https://github.com/ThriftyStack/platform.git
   applicationsRepository: https://github.com/ThriftyStack/applications.git
   revision: main
-# Explicit security approvals; adding a Git profile does not grant destination access.
 spokeProjects: {}
-# Workload charts live in ThriftyStack/applications; enable a project only after review.
 workloadProjects: {}
