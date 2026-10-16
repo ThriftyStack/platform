@@ -1,0 +1,53 @@
+{{ if eq .Values.cluster.id "management" }}
+---
+apiVersion: pki.vault.upbound.io/v1alpha1
+kind: SecretBackendRootSignIntermediate
+metadata:
+  name: management-2026
+  annotations:
+    argocd.argoproj.io/sync-wave: "-15"
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  deletionPolicy: Orphan
+  managementPolicies:
+  - Observe
+  - Create
+  providerConfigRef:
+    name: management-vault
+  forProvider:
+    backend: pki-root
+    issuerRef: root-2026
+    csr: |-
+      -----BEGIN CERTIFICATE REQUEST-----
+      MIHtMIGUAgEAMDIxMDAuBgNVBAMTJ1RocmlmdHlTdGFjayBNYW5hZ2VtZW50IElz
+      c3VpbmcgQ0EgMjAyNjBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABMmuW6AnSz77
+      MxVFkVIjOaz9Ri5XkbnhTsGrYWtUsMZnLkM4rFpAFD3blrUGojae2KDlNRxVCfmv
+      ktaCFh52R1mgADAKBggqhkjOPQQDAgNIADBFAiEA96KmPt+d8QWykw/CweKE2ex+
+      QxYyvNTwXTttvhlQoIQCICeku36AoqEVT0C6/IHbv++XexyHKflzdoOm2jnE7775
+      -----END CERTIFICATE REQUEST-----
+    commonName: ThriftyStack Management Issuing CA 2026
+    format: pem_bundle
+    ttl: '31536000'
+    maxPathLength: 0
+    permittedUriDomains:
+    - mgmt.thriftystack.internal
+---
+apiVersion: pki.vault.upbound.io/v1alpha1
+kind: SecretBackendIntermediateSetSigned
+metadata:
+  name: management-2026
+  annotations:
+    argocd.argoproj.io/sync-wave: "-14"
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  deletionPolicy: Orphan
+  managementPolicies:
+  - Observe
+  - Create
+  providerConfigRef:
+    name: management-vault
+  forProvider:
+    backend: pki-management
+    certificateRef:
+      name: management-2026
+{{ end }}
