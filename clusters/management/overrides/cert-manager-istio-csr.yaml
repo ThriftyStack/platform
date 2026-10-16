@@ -1,1 +1,3 @@
---- {}
+# Management uses chart defaults (mgmt trust domain / clusterID).
+# Keep this file so the Application valueFiles path stays stable.
+{}
