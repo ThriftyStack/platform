@@ -2,7 +2,7 @@
 stages:
   foundation: true
   vault: true
-  pki: false
+  pki: true
   certificates: false
   istio: false
   qualification: false
