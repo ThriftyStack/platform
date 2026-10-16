@@ -1,0 +1,25 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: istio-root-ca
+  namespace: cert-manager
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+data:
+  ca.pem: |-
+    -----BEGIN CERTIFICATE-----
+    MIICRjCCAcygAwIBAgIUQ/mYjedzbexbRBfovyo9dYpZEk4wCgYIKoZIzj0EAwMw
+    KjEoMCYGA1UEAxMfVGhyaWZ0eVN0YWNrIFdvcmtsb2FkIFJvb3QgMjAyNjAeFw0y
+    NjEwMTYxNDEyNTBaFw0zNjEwMTMxNDEzMjBaMCoxKDAmBgNVBAMTH1RocmlmdHlT
+    dGFjayBXb3JrbG9hZCBSb290IDIwMjYwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAQD
+    lYRrn/tmhwXw8Qj0qUjwstbky2hUqMFMe1D/r5KhJYyOcIBrH4N1tBG/JscGH6fO
+    GujZ8NNPFSUjTYPT1cnOStwdmb9xFhJx8crClxxIi/G5CGIBJwvuL5oJmgu5Kbuj
+    gbIwga8wDgYDVR0PAQH/BAQDAgEGMBIGA1UdEwEB/wQIMAYBAf8CAQEwHQYDVR0O
+    BBYEFNwsAbWl+1ue7lgOXY8Nln7aifxpMB8GA1UdIwQYMBaAFNwsAbWl+1ue7lgO
+    XY8Nln7aifxpMEkGA1UdHgEB/wQ/MD2gOzAchhptZ210LnRocmlmdHlzdGFjay5p
+    bnRlcm5hbDAbhhlvY2kudGhyaWZ0eXN0YWNrLmludGVybmFsMAoGCCqGSM49BAMD
+    A2gAMGUCMQDOCl4issPYjuSzr2JcD1dl9zNf92bCh3qrR2yhig3cKlcc1bO5ZE+S
+    K/rfA2+XSwwCMHrZmpazX/Lxm0oQzk4akQBYp0GZbf8/9gYOOWG65S5X+g0BnO4j
+    9y98VtK18ZHMyg==
+    -----END CERTIFICATE-----
