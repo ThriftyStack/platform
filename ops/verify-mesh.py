@@ -25,17 +25,33 @@ def run(*args):
     return result.stdout
 
 def chain_from_response(response):
-    for secret in response.get('dynamicActiveSecrets', []):
-        chain = secret.get('secret', {}).get('tlsCertificate', {}).get('certificateChain', {})
-        if 'inlineBytes' in chain:
-            return base64.b64decode(chain['inlineBytes'], validate=True).decode('ascii')
-        if 'inlineString' in chain:
-            return chain['inlineString']
+    # istioctl uses camelCase; pilot-agent config_dump uses snake_case.
+    secrets = response.get('dynamicActiveSecrets') or response.get('dynamic_active_secrets') or []
+    for secret in secrets:
+        tls = (secret.get('secret') or {}).get('tlsCertificate') or (secret.get('secret') or {}).get('tls_certificate') or {}
+        chain = tls.get('certificateChain') or tls.get('certificate_chain') or {}
+        if 'inlineBytes' in chain or 'inline_bytes' in chain:
+            raw = chain.get('inlineBytes', chain.get('inline_bytes'))
+            return base64.b64decode(raw, validate=True).decode('ascii')
+        if 'inlineString' in chain or 'inline_string' in chain:
+            return chain.get('inlineString', chain.get('inline_string'))
     raise ValueError('No active workload certificate chain')
 
+def proxy_secret_dump(pod):
+    # Prefer istioctl; fall back to pilot-agent when istioctl is absent.
+    try:
+        return run('istioctl', 'proxy-config', 'secret', pod, '-n', 'mesh-test', '-o', 'json')
+    except (RuntimeError, FileNotFoundError):
+        dump = run('kubectl', '-n', 'mesh-test', 'exec', pod, '-c', 'istio-proxy', '--',
+                   'pilot-agent', 'request', 'GET', '/config_dump')
+        for config in json.loads(dump).get('configs', []):
+            if config.get('@type', '').endswith('SecretsConfigDump') or 'dynamic_active_secrets' in config or 'dynamicActiveSecrets' in config:
+                return json.dumps(config)
+        raise ValueError('No SecretsConfigDump in pilot-agent config_dump')
+
 def certificate(pod, trusted_root):
-    # istioctl may return secret fields. Extract ONLY public certificate chain in memory.
-    payload = run('istioctl', 'proxy-config', 'secret', pod, '-n', 'mesh-test', '-o', 'json')
+    # May return secret fields. Extract ONLY public certificate chain in memory.
+    payload = proxy_secret_dump(pod)
     chain = chain_from_response(json.loads(payload))
     del payload
     certs = re.findall(r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', chain, re.S)
@@ -57,9 +73,9 @@ def certificate(pod, trusted_root):
         return {'serial': serial, 'validity': validity}
 
 def traffic(permissive):
-    command = ('--', 'curl', '--fail', '--silent', '--show-error', '--max-time', '10', '--write-out', '%{http_code}', 'http://server.mesh-test.svc/')
-    run('kubectl', '-n', 'mesh-test', 'exec', 'deploy/client', '-c', 'client', *command)
-    plaintext = subprocess.run(command('kubectl', '-n', 'mesh-test', 'exec', 'deploy/plaintext', '-c', 'plaintext', *command), capture_output=True, text=True)
+    curl = ('--', 'curl', '--fail', '--silent', '--show-error', '--max-time', '10', '--write-out', '%{http_code}', 'http://server.mesh-test.svc/')
+    run('kubectl', '-n', 'mesh-test', 'exec', 'deploy/client', '-c', 'client', *curl)
+    plaintext = subprocess.run(command('kubectl', '-n', 'mesh-test', 'exec', 'deploy/plaintext', '-c', 'plaintext', *curl), capture_output=True, text=True)
     if (plaintext.returncode == 0) != permissive:
         raise ValueError('Plaintext result does not match requested PERMISSIVE/STRICT phase')
     if not permissive and not plaintext.stdout.endswith('000'):
@@ -116,7 +132,11 @@ def main():
     if len(pods) != 1:
         raise ValueError('Exactly one qualification client is required')
     pod = pods[0]['metadata']['name']; uid = pods[0]['metadata']['uid']
-    if 'istio-proxy' not in [c['name'] for c in pods[0]['spec']['containers']]:
+    # Istio 1.30+ on modern Kubernetes injects istio-proxy as a native sidecar
+    # (initContainer with restartPolicy=Always), not as a regular container.
+    container_names = [c['name'] for c in pods[0]['spec'].get('containers', [])]
+    init_names = [c['name'] for c in pods[0]['spec'].get('initContainers', [])]
+    if 'istio-proxy' not in container_names and 'istio-proxy' not in init_names:
         raise ValueError('Qualification client is not enrolled')
     namespaces = {n['metadata']['name']: n for n in json.loads(run('kubectl', 'get', 'namespaces', '-o', 'json'))['items']}
     for namespace in ('kube-system', 'longhorn-system', 'vault', 'crossplane-system', 'cert-manager', 'argocd', 'istio-system'):
