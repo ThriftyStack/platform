@@ -14,11 +14,11 @@ spec:
   source:
     repoURL: https://github.com/sudoceohq/argocd.git
     targetRevision: main
-    path: configuration/vault-pki
+    path: infrastructure/configuration/vault-pki
     helm:
       releaseName: {{ . }}-vault-pki
       valueFiles:
-        - ../../clusters/{{ . }}/cluster.yaml
+        - ../../../clusters/{{ . }}/cluster.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: crossplane-system

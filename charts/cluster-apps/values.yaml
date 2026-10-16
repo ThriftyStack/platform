@@ -1,0 +1,132 @@
+# Inert until a cluster profile supplies identity and stage flags.
+cluster:
+  id: ""
+  role: ""
+  environment: ""
+  cloud: ""
+  enabled: false
+  prepared: false
+  server: ""
+  operatorServer: ""
+  context: ""
+  trustDomain: ""
+  vaultAddress: ""
+  authMount: ""
+  pkiMount: ""
+  issuerCommonName: ""
+  issuerGeneration: ""
+  providerConfig: ""
+  manageRoot: false
+  localReviewer: false
+  signerRole: ""
+  vaultTLSName: ""
+stages:
+  foundation: false
+  vault: false
+  pki: false
+  certificates: false
+  istio: false
+  qualification: false
+  enrollment: false
+pkiClusters: []
+fleet:
+  enabled: false
+  repository: ""
+  applicationsRepository: ""
+  revision: ""
+spokeProjects: {}
+# Workload AppProjects source only fleet.applicationsRepository; empty until an app is approved.
+workloadProjects: {}
+services:
+  - name: longhorn
+    releaseName: longhorn
+    stage: foundation
+    role: management
+    wave: "-30"
+    path: infrastructure/charts/longhorn
+    namespace: longhorn-system
+    namespaceLabels:
+      pod-security.kubernetes.io/enforce: privileged
+      pod-security.kubernetes.io/audit: privileged
+      pod-security.kubernetes.io/warn: privileged
+  - name: crossplane
+    releaseName: crossplane
+    stage: foundation
+    role: management
+    wave: "-20"
+    path: infrastructure/charts/crossplane
+    namespace: crossplane-system
+  - name: vault-provider
+    releaseName: vault-provider
+    stage: foundation
+    role: management
+    wave: "-10"
+    path: infrastructure/configuration/vault-provider
+    namespace: crossplane-system
+  - name: vault
+    releaseName: vault
+    stage: vault
+    role: management
+    wave: "0"
+    path: infrastructure/charts/vault
+    namespace: vault
+    skipTests: true
+  - name: vault-pki
+    releaseName: vault-pki
+    stage: pki
+    role: management
+    wave: "10"
+    path: infrastructure/configuration/vault-pki
+    namespace: crossplane-system
+  - name: cert-manager
+    releaseName: cert-manager
+    stage: certificates
+    wave: "20"
+    path: infrastructure/charts/cert-manager
+    namespace: cert-manager
+  - name: mesh-prerequisites
+    releaseName: mesh-prerequisites
+    stage: certificates
+    wave: "25"
+    path: infrastructure/configuration/mesh-prerequisites
+    namespace: istio-system
+  - name: vault-issuer
+    releaseName: vault-issuer
+    stage: certificates
+    wave: "30"
+    path: infrastructure/configuration/vault-issuer
+    namespace: istio-system
+  - name: cert-manager-istio-csr
+    releaseName: cert-manager-istio-csr
+    stage: istio
+    wave: "40"
+    path: infrastructure/charts/cert-manager-istio-csr
+    namespace: cert-manager
+    valueFiles:
+      - overrides/cert-manager-istio-csr.yaml
+  - name: istio-base
+    releaseName: istio-base
+    stage: istio
+    wave: "50"
+    path: infrastructure/charts/istio-base
+    namespace: istio-system
+  - name: istiod
+    releaseName: istiod
+    stage: istio
+    wave: "60"
+    path: infrastructure/charts/istiod
+    namespace: istio-system
+    valueFiles:
+      - overrides/istiod.yaml
+  - name: mesh-qualification
+    releaseName: mesh-qualification
+    stage: qualification
+    wave: "65"
+    path: infrastructure/configuration/mesh-qualification
+    namespace: mesh-test
+  - name: mesh-enrollment
+    releaseName: mesh-enrollment
+    stage: enrollment
+    wave: "70"
+    path: infrastructure/configuration/mesh-enrollment
+    namespace: mesh-test

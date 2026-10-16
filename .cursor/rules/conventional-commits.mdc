@@ -1,0 +1,38 @@
+---
+description: Always use Conventional Commits for git commit messages
+alwaysApply: true
+---
+
+# Conventional Commits
+
+Every commit subject must follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(optional-scope): <description>
+```
+
+Allowed types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
+
+Rules:
+
+- Subject in imperative mood, lowercase description, no trailing period
+- Keep the subject ≤ 72 characters
+- Group a change and everything that follows from it (code, tests, docs) into one commit
+- Body explains **why**, not what — omit lines that are obvious from the diff
+- Breaking changes: `BREAKING CHANGE:` in the body, or `!` after the type/scope
+
+```text
+# ❌ BAD
+Update vault values
+Fixed stuff.
+
+# ✅ GOOD
+feat(pki): stage remote intermediate issuance for spoke clusters
+
+fix(istio): pin CSR signer address to the rendered service name
+
+The previous default resolved against the management trust domain and
+broke spoke enrollment.
+```
+
+When creating commits for the user, always use this format (including the HEREDOC flow from the commit workflow).

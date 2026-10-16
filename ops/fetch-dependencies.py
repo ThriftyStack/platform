@@ -10,7 +10,7 @@ root = Path(__file__).resolve().parents[1]
 cache = Path(sys.argv[1])
 cache.mkdir(parents=True, exist_ok=True)
 lock = json.loads((root / 'dependencies.lock.json').read_text())
-for artifact in lock['charts'] + lock['vaultProvider']['schemas']:
+for artifact in lock['charts'] + lock['vaultProvider']['schemas'] + lock.get('validationCharts', []):
     path = cache / artifact.get('archive', artifact.get('file'))
     data = path.read_bytes() if path.exists() else urllib.request.urlopen(artifact['url'], timeout=60).read()
     if hashlib.sha256(data).hexdigest() != artifact['sha256']:

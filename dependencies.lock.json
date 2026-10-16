@@ -106,5 +106,14 @@
       }
     ],
     "packageTag": "xpkg.upbound.io/upbound/provider-vault:v4.0.2"
-  }
+  },
+  "validationCharts": [
+    {
+      "chart": "argo-cd",
+      "version": "10.9.6",
+      "archive": "argo-cd-10.9.6.tgz",
+      "sha256": "6eda90bdd18de538511c9b9aca1ca7ba7a1ca5b919f598714d0e91cd7155d119",
+      "url": "https://github.com/argoproj/argo-helm/releases/download/argo-cd-10.9.6/argo-cd-10.9.6.tgz"
+    }
+  ]
 }

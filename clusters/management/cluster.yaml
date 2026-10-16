@@ -2,6 +2,8 @@
 cluster:
   id: management
   role: management
+  environment: management
+  cloud: proxmox
   enabled: true
   prepared: true
   server: https://kubernetes.default.svc

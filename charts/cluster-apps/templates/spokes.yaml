@@ -1,0 +1,79 @@
+{{- if and .Values.cluster.enabled (eq .Values.cluster.role "management") .Values.fleet.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: spokes
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: '-5'
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  goTemplate: true
+  goTemplateOptions: [missingkey=error]
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: {{ .Values.fleet.repository | quote }}
+              revision: {{ .Values.fleet.revision | quote }}
+              files:
+                - path: clusters/*/cluster.yaml
+                - path: clusters/management/cluster.yaml
+                  exclude: true
+          - clusters:
+              selector:
+                matchLabels:
+                  argocd.argoproj.io/secret-type: cluster
+                  thriftystack.io/role: spoke
+                  thriftystack.io/cluster-id: {{ "{{ .cluster.id }}" | quote }}
+                  thriftystack.io/environment: {{ "{{ .cluster.environment }}" | quote }}
+                  thriftystack.io/cloud: {{ "{{ .cluster.cloud }}" | quote }}
+                  thriftystack.io/enabled: {{ "{{ .cluster.enabled }}" | quote }}
+                  thriftystack.io/prepared: {{ "{{ .cluster.prepared }}" | quote }}
+                matchExpressions:
+                  - key: thriftystack.io/enabled
+                    operator: In
+                    values: ['true']
+                  - key: thriftystack.io/prepared
+                    operator: In
+                    values: ['true']
+  syncPolicy:
+    applicationsSync: create-update
+    preserveResourcesOnDeletion: true
+  template:
+    metadata:
+      # Refuse a registered API that differs from the reviewed profile.
+      name: {{ "{{ if ne .server .cluster.server }}{{ fail \"Registered API differs from cluster profile\" }}{{ end }}{{ .cluster.id }}" | quote }}
+      namespace: argocd
+      labels:
+        thriftystack.io/role: spoke-root
+        thriftystack.io/cluster-id: {{ "{{ .cluster.id }}" | quote }}
+        thriftystack.io/environment: {{ "{{ .cluster.environment }}" | quote }}
+        thriftystack.io/cloud: {{ "{{ .cluster.cloud }}" | quote }}
+      annotations:
+        argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    spec:
+      project: {{ "{{ .cluster.id }}" | quote }}
+      source:
+        repoURL: {{ .Values.fleet.repository | quote }}
+        targetRevision: {{ .Values.fleet.revision | quote }}
+        path: charts/cluster-apps
+        helm:
+          valueFiles:
+            - {{ "../../clusters/{{ .cluster.id }}/values.yaml" | quote }}
+            - {{ "../../clusters/{{ .cluster.id }}/cluster.yaml" | quote }}
+          parameters:
+            - name: cluster.server
+              value: {{ "{{ .server }}" | quote }}
+      # Every root and child Application lives on the hub; child destinations use the spoke API.
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: argocd
+      syncPolicy:
+        automated:
+          prune: false
+          selfHeal: true
+        retry:
+          limit: 5
+          backoff: {duration: 10s, factor: 2, maxDuration: 3m}
+{{- end }}

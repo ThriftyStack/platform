@@ -8,6 +8,10 @@ require 'tempfile'
 ROOT = File.expand_path('..', __dir__)
 CACHE = ENV.fetch('CHART_CACHE')
 HELM = ENV.fetch('HELM', 'helm')
+CHART = "#{ROOT}/charts/cluster-apps"
+def cluster_profile(id)
+  ['-f', "#{ROOT}/clusters/#{id}/values.yaml", '-f', "#{ROOT}/clusters/#{id}/cluster.yaml"]
+end
 def check(value, message)
   raise message unless value
 end
@@ -45,13 +49,13 @@ def validate(value, schema, location)
   end
 end
 lock = JSON.parse(File.read("#{ROOT}/dependencies.lock.json"))
-(lock['charts'] + lock['vaultProvider']['schemas']).each do |artifact|
+(lock['charts'] + lock['vaultProvider']['schemas'] + lock.fetch('validationCharts', [])).each do |artifact|
   file = "#{CACHE}/#{artifact['archive'] || artifact['file']}"
   check(Digest::SHA256.file(file).hexdigest == artifact['sha256'], "Locked artifact mismatch #{file}")
 end
 schemas = lock['vaultProvider']['schemas'].map { |s| YAML.safe_load(File.read("#{CACHE}/#{s['file']}"), aliases: true) }
 stage_flags = %w[vault pki certificates istio qualification enrollment].flat_map { |s| ['--set', "stages.#{s}=true"] }
-apps = render(HELM, 'template', 'management', "#{ROOT}/clusters/management", *stage_flags)
+apps = render(HELM, 'template', 'management', CHART, *cluster_profile('management'), *stage_flags).select { |o| o['kind']=='Application' }
 by_name = apps.to_h { |a| [a['metadata']['name'], a] }
 order = %w[longhorn crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment]
 waves = order.map { |name| by_name.fetch(name).dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave').to_i }
@@ -61,6 +65,7 @@ apps.each do |app|
   check(!app.dig('metadata','finalizers'), 'No cascading application deletion')
   check(app.dig('spec','syncPolicy','automated','prune') == false, 'No automated infrastructure pruning')
   source = app.dig('spec','source')
+  check(source['path'].start_with?('infrastructure/'), 'Platform services must remain separate from workload application charts')
   chart = "#{ROOT}/#{source['path']}"
   values = source.dig('helm','valueFiles').flat_map { |f| ['-f',File.expand_path(f, chart)] }
   rendered[app['metadata']['name']] = render(HELM, 'template', source.dig('helm','releaseName'), chart,
@@ -79,9 +84,9 @@ apps.each do |app|
   end
 end
 def configuration(name)
-  render(HELM,'template',name,"#{ROOT}/configuration/#{name}")
+  render(HELM,'template',name,"#{ROOT}/infrastructure/configuration/#{name}")
 end
-Dir["#{ROOT}/configuration/*"].each do |directory|
+Dir["#{ROOT}/infrastructure/configuration/*"].each do |directory|
   objects = configuration(File.basename(directory))
   objects.select { |o| o['apiVersion'].include?('vault.upbound.io') }.each do |object|
     crd = schemas.find { |s| s.dig('spec','group') == object['apiVersion'].split('/')[0] && s.dig('spec','names','kind') == object['kind'] }
@@ -133,9 +138,10 @@ check(File.read("#{ROOT}/ops/promote.rb").include?("'--require-renewal'"), 'STRI
 puts "PKI/GitOps offline contracts: passed; rendered #{rendered.length} pinned charts and all custom Helm charts"
 # Remote profile is inert by default and creates only namespaced cluster destinations when explicitly staged.
 oci = "#{ROOT}/clusters/oci"
-check(render(HELM,'template','oci',"#{ROOT}/clusters/management",'-f',"#{oci}/values.yaml",'-f',"#{oci}/cluster.yaml").empty?, 'Unconfigured OCI must render nothing')
+check(render(HELM,'template','unprofiled',CHART).empty?, 'Cluster-apps chart without a profile must render nothing')
+check(render(HELM,'template','oci',CHART,*cluster_profile('oci')).empty?, 'Unconfigured OCI must render nothing')
 remote_flags = ['--set','cluster.enabled=true','--set','cluster.prepared=true','--set','cluster.server=https://oci-api.invalid:6443','--set','cluster.vaultAddress=https://vault.private.invalid:8200']
-remote_apps = render(HELM,'template','oci',"#{ROOT}/clusters/management",'-f',"#{oci}/values.yaml",'-f',"#{oci}/cluster.yaml",*stage_flags,*remote_flags)
+remote_apps = render(HELM,'template','oci',CHART,*cluster_profile('oci'),*stage_flags,*remote_flags)
 check(remote_apps.length==8, 'Workload cluster must not deploy management storage, Crossplane, Vault or root PKI')
 remote_apps.each do |a|
   check(a.dig('metadata','name').start_with?('oci-') && a.dig('spec','project')=='oci', 'Remote Applications must be cluster-scoped')
@@ -148,7 +154,11 @@ remote_apps.each do |a|
     check(c.dig('spec','uris')==['spiffe://oci.thriftystack.internal/ns/istio-system/sa/istiod-service-account'], 'OCI must never use management SPIFFE identities')
   end
 end
-remote_pki=render(HELM,'template','oci-pki',"#{ROOT}/configuration/vault-pki",'-f',"#{oci}/cluster.yaml")
+remote_declaration=render(HELM,'template','management',CHART,*cluster_profile('management'),'--set','stages.pki=true','--set','pkiClusters={oci}').find { |o| o['kind']=='Application' && o.dig('metadata','name')=='oci-vault-pki' }
+check(remote_declaration.dig('spec','source','path')=='infrastructure/configuration/vault-pki' && remote_declaration.dig('spec','destination','server')=='https://kubernetes.default.svc', 'Remote PKI must remain centrally owned after layout changes')
+remote_chart=File.join(ROOT,remote_declaration.dig('spec','source','path'))
+check(remote_declaration.dig('spec','source','helm','valueFiles').all? { |p| File.file?(File.expand_path(p,remote_chart)) }, 'Remote PKI values paths must resolve from the relocated chart')
+remote_pki=render(HELM,'template','oci-pki',"#{ROOT}/infrastructure/configuration/vault-pki",'-f',"#{oci}/cluster.yaml")
 check(remote_pki.none? { |o| %w[SecretBackendRootCert ProviderConfig AuthBackendConfig].include?(o['kind']) }, 'Remote PKI must reuse central provider/root and cannot use the local reviewer')
 check(remote_pki.find { |o| o['kind']=='SecretBackendRole' }.dig('spec','forProvider','allowedUriSans')==['spiffe://oci.thriftystack.internal/ns/*/sa/*'], 'OCI intermediate URI constraint')
 check(remote_pki.find { |o| o['kind']=='SecretBackendRole' }.dig('metadata','name')=='oci-istio', 'Central PKI resources must not collide across clusters')
@@ -157,13 +167,23 @@ check(sts.dig('metadata','name')=='vault' && sts.dig('spec','template','metadata
 check(rendered['cert-manager'].any? { |o| o['kind']=='ServiceAccount' && o.dig('metadata','name')=='cert-manager' }, 'Vault token RBAC must bind the real controller SA')
 check(csr.any? { |o| o['kind']=='Service' && o.dig('metadata','name')=='cert-manager-istio-csr' }, 'Istiod CA address must resolve to the rendered signer service')
 puts 'Management and inactive/synthetic OCI Helm contracts: passed (no live registration or deployment)'
-_, _, invalid = Open3.capture3(HELM,'template','oci',"#{ROOT}/clusters/management",'-f',"#{oci}/values.yaml",'-f',"#{oci}/cluster.yaml",'--set','cluster.enabled=true')
+_, _, invalid = Open3.capture3(HELM,'template','oci',CHART,*cluster_profile('oci'),'--set','cluster.enabled=true')
 check(!invalid.success?, 'Unprepared OCI activation must fail')
-_, _, invalid = Open3.capture3(HELM,'template','wrong-domain',"#{ROOT}/charts/cert-manager-istio-csr",'-f',"#{oci}/cluster.yaml")
+_, _, invalid = Open3.capture3(HELM,'template','wrong-domain',"#{ROOT}/infrastructure/charts/cert-manager-istio-csr",'-f',"#{oci}/cluster.yaml")
 check(!invalid.success?, 'Management signer defaults must fail for an OCI cluster without domain overrides')
 
 longhorn = rendered.fetch('longhorn')
 check(longhorn.none? { |o| o['kind']=='Job' && o.dig('metadata','name')=='longhorn-pre-upgrade' }, 'Argo installation must not wait on a pre-upgrade job before SA/RBAC exists')
 check(longhorn.any? { |o| o['kind']=='ServiceAccount' && o.dig('metadata','name')=='longhorn-service-account' }, 'Longhorn must install its service account normally')
-checker = YAML.safe_load(File.read("#{ROOT}/charts/longhorn/values.yaml")).dig('longhorn','preUpgradeChecker')
+checker = YAML.safe_load(File.read("#{ROOT}/infrastructure/charts/longhorn/values.yaml")).dig('longhorn','preUpgradeChecker')
 check(checker['jobEnabled']==false && checker['upgradeVersionCheck']==true, 'Disable only the GitOps hook, keep upgrade safety enabled')
+require_relative 'fleet-check'
+workflow = YAML.safe_load(File.read("#{ROOT}/.github/workflows/validate.yaml"))
+check(workflow['permissions']=={'contents'=>'read'}, 'Validation must have read-only repository permissions')
+check(workflow['on'].keys.sort==%w[pull_request push workflow_dispatch], 'No privileged pull_request_target execution')
+job=workflow.fetch('jobs').fetch('validate')
+check(job['runs-on']=='ubuntu-24.04' && job['timeout-minutes']==15, 'Bound validation runtime')
+steps=job.fetch('steps')
+check(steps.select { |s| s['uses'] }.all? { |s| s['uses'].match?(/@[0-9a-f]{40}$/) && s.dig('with','persist-credentials')==false }, 'Pin actions and never persist write credentials')
+check(steps.last['run'].include?('ruby ops/check.rb') && steps.last['run'].include?('python3 ops/verify-mesh.py --self-test'), 'CI must run the same offline contracts as operators')
+puts 'Read-only GitOps PR validation workflow: passed'

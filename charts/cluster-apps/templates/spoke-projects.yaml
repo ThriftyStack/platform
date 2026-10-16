@@ -1,0 +1,47 @@
+{{- if and .Values.cluster.enabled (eq .Values.cluster.role "management") }}
+{{- range $id, $project := .Values.spokeProjects }}
+{{- if $project.enabled }}
+{{- if or (eq $id "management") (gt (len $id) 63) (not (regexMatch "^[a-z]([a-z0-9-]*[a-z0-9])?$" $id)) }}
+{{- fail "Spoke project IDs must be DNS-safe and distinct from management" }}
+{{- end }}
+{{- $server := required "Approved spoke projects require an explicit API server" $project.server }}
+{{- if or (not (hasPrefix "https://" $server)) (contains "*" $server) }}{{- fail "Spoke projects require a TLS API" }}{{- end }}
+{{- $namespaces := required "Spoke projects require approved workload namespaces" $project.namespaces }}
+{{- range $namespaces }}
+{{- if or (gt (len .) 63) (not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" .)) }}
+{{- fail "Approved namespaces must be explicit DNS labels" }}
+{{- end }}
+{{- end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ $id }}
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: '-6'
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  description: Approved spoke {{ $id }}; managed by the hub GitOps root.
+  sourceRepos:
+    - {{ $.Values.fleet.repository | quote }}
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: argocd
+    {{- range $namespaces }}
+    - server: {{ $server | quote }}
+      namespace: {{ . | quote }}
+    {{- end }}
+  clusterResourceWhitelist:
+    # Required by cert-manager/Istio installation; no wildcard cluster resources.
+    - {group: '', kind: Namespace}
+    - {group: apiextensions.k8s.io, kind: CustomResourceDefinition}
+    - {group: rbac.authorization.k8s.io, kind: ClusterRole}
+    - {group: rbac.authorization.k8s.io, kind: ClusterRoleBinding}
+    - {group: admissionregistration.k8s.io, kind: MutatingWebhookConfiguration}
+    - {group: admissionregistration.k8s.io, kind: ValidatingWebhookConfiguration}
+  orphanedResources:
+    warn: true
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,51 @@
+{{- range .Values.services }}
+{{- if and $.Values.cluster.enabled (index $.Values.stages .stage) (or (not .role) (eq $.Values.cluster.role .role)) }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ if ne $.Values.cluster.id "management" }}{{ $.Values.cluster.id }}-{{ end }}{{ .name }}
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ .wave | quote }}
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  project: {{ $.Values.cluster.id }}
+  source:
+    repoURL: https://github.com/sudoceohq/argocd.git
+    targetRevision: main
+    helm:
+      releaseName: {{ .releaseName }}
+      {{- if .skipTests }}
+      skipTests: true
+      {{- end }}
+      valueFiles:
+      - "../../../clusters/{{ $.Values.cluster.id }}/cluster.yaml"
+      {{- range .valueFiles }}
+      - "../../../clusters/{{ $.Values.cluster.id }}/{{ . }}"
+      {{- end }}
+    path: {{ .path }}
+  destination:
+    server: {{ $.Values.cluster.server | quote }}
+    namespace: {{ .namespace }}
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    managedNamespaceMetadata:
+      labels:
+        istio-injection: disabled
+        {{- range $key, $value := .namespaceLabels }}
+        {{ $key }}: {{ $value }}
+        {{- end }}
+{{- end }}
+{{- end }}

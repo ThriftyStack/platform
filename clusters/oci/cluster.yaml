@@ -2,6 +2,8 @@
 cluster:
   id: oci
   role: workload
+  environment: unassigned
+  cloud: oci
   enabled: false
   prepared: false
   server: ''

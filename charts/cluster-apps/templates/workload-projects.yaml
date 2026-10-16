@@ -1,0 +1,43 @@
+{{- if and .Values.cluster.enabled (eq .Values.cluster.role "management") }}
+{{- range $id, $project := .Values.workloadProjects }}
+{{- if $project.enabled }}
+{{- $appsRepo := required "Workload projects require fleet.applicationsRepository" $.Values.fleet.applicationsRepository }}
+{{- if or (not (hasPrefix "https://" $appsRepo)) (eq $appsRepo $.Values.fleet.repository) }}
+{{- fail "Workload source repository must be a distinct HTTPS Git URL from the platform repository" }}
+{{- end }}
+{{- if or (eq $id "management") (hasKey $.Values.spokeProjects $id) (gt (len $id) 63) (not (regexMatch "^[a-z]([a-z0-9-]*[a-z0-9])?$" $id)) }}
+{{- fail "Workload project IDs must be DNS-safe and distinct from management and spoke projects" }}
+{{- end }}
+{{- $server := required "Approved workload projects require an explicit API server" $project.server }}
+{{- if or (not (hasPrefix "https://" $server)) (contains "*" $server) }}{{- fail "Workload projects require a TLS API" }}{{- end }}
+{{- $namespaces := required "Workload projects require approved workload namespaces" $project.namespaces }}
+{{- range $namespaces }}
+{{- if or (eq . "argocd") (gt (len .) 63) (not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" .)) }}
+{{- fail "Workload namespaces must be explicit DNS labels and must not include argocd" }}
+{{- end }}
+{{- end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ $id }}
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: '-6'
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  description: Approved workload project {{ $id }}; charts from the applications repository only.
+  sourceRepos:
+    - {{ $appsRepo | quote }}
+  destinations:
+    {{- range $namespaces }}
+    - server: {{ $server | quote }}
+      namespace: {{ . | quote }}
+    {{- end }}
+  # Namespace-scoped workloads only; no cluster-scoped privileges by default.
+  clusterResourceWhitelist: []
+  orphanedResources:
+    warn: true
+{{- end }}
+{{- end }}
+{{- end }}

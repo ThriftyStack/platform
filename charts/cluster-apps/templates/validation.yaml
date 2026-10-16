@@ -11,11 +11,13 @@
 {{- fail "STRICT enrollment requires qualification first" }}
 {{- end }}
 {{- end }}
+{{- if or .Values.cluster.enabled .Values.cluster.id }}
 {{- if not (has .Values.cluster.role (list "management" "workload")) }}
 {{- fail "cluster.role must be management or workload" }}
 {{- end }}
 {{- if not (regexMatch "^[a-z][a-z0-9-]*$" .Values.cluster.id) }}
 {{- fail "cluster.id must be a DNS-safe identifier" }}
+{{- end }}
 {{- end }}
 {{- if and .Values.cluster.enabled (not (hasPrefix "https://" .Values.cluster.server)) }}
 {{- fail "Enabled cluster destinations must use TLS" }}

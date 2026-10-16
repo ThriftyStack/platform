@@ -1,23 +1,3 @@
----
-cluster:
-  id: management
-  role: management
-  enabled: true
-  prepared: true
-  server: https://kubernetes.default.svc
-  operatorServer: https://10.0.10.83:6443
-  context: ''
-  trustDomain: mgmt.thriftystack.internal
-  vaultAddress: https://vault.vault.svc:8200
-  authMount: kubernetes-management
-  pkiMount: pki-management
-  issuerCommonName: ThriftyStack Management Issuing CA 2026
-  issuerGeneration: management-2026
-  providerConfig: management-vault
-  manageRoot: true
-  localReviewer: true
-  signerRole: istio-signer
-  vaultTLSName: vault.vault.svc
 stages:
   foundation: true
   vault: false
@@ -28,3 +8,13 @@ stages:
   enrollment: false
 # Add a workload cluster ID only after remote Vault auth and reviewer trust exist.
 pkiClusters: []
+# The management App-of-Apps is the hub. Credentials exist only in Argo registration Secrets.
+fleet:
+  enabled: true
+  repository: https://github.com/sudoceohq/argocd.git
+  applicationsRepository: https://github.com/sudoceohq/applications.git
+  revision: main
+# Explicit security approvals; adding a Git profile does not grant destination access.
+spokeProjects: {}
+# Workload charts live in sudoceohq/applications; enable a project only after review.
+workloadProjects: {}

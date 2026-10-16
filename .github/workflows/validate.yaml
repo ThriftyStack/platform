@@ -1,0 +1,42 @@
+name: GitOps validation
+
+'on':
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitops-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: GitOps contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CHART_CACHE: ${{ runner.temp }}/chart-cache
+      HELM: ${{ runner.temp }}/helm/linux-amd64/helm
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install checksum-pinned Helm
+        env:
+          HELM_ARCHIVE_SHA256: a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$(dirname "$HELM")")"
+          curl --fail --silent --show-error --location --retry 3 https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz -o "$RUNNER_TEMP/helm.tar.gz"
+          printf '%s  %s\n' "$HELM_ARCHIVE_SHA256" "$RUNNER_TEMP/helm.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$(dirname "$(dirname "$HELM")")"
+      - name: Verify dependencies and render all deployment stages
+        run: |
+          set -euo pipefail
+          python3 ops/fetch-dependencies.py "$CHART_CACHE"
+          ruby ops/check.rb
+          python3 ops/verify-mesh.py --self-test

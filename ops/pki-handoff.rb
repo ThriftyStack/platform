@@ -43,7 +43,7 @@ when 'sign'
     'format'=>'pem_bundle','ttl'=>'31536000','maxPathLength'=>0,'permittedUriDomains'=>[TARGET.fetch('trustDomain')]}, -15)
   install = managed('SecretBackendIntermediateSetSigned', TARGET.fetch('issuerGeneration'), {
     'backend'=>TARGET.fetch('pkiMount'),'certificateRef'=>{'name'=>TARGET.fetch('issuerGeneration')}}, -14)
-  add_file('configuration/vault-pki', "#{TARGET_ID}-signed.yaml", [sign, install])
+  add_file('infrastructure/configuration/vault-pki', "#{TARGET_ID}-signed.yaml", [sign, install])
   puts 'Prepared public CSR signing/import resources. Review and publish through GitOps; no API writes performed.'
 when 'trust'
   root = ready('secretbackendrootcerts.pki.vault.upbound.io', 'workload-root').fetch('certificate')
@@ -60,7 +60,7 @@ when 'trust'
     end
   end
   trust = {'apiVersion'=>'v1','kind'=>'ConfigMap','metadata'=>{'name'=>'istio-root-ca','namespace'=>'cert-manager','annotations'=>{'argocd.argoproj.io/sync-options'=>'Prune=false,Delete=false'}},'data'=>{'ca.pem'=>root}}
-  add_file('configuration/mesh-prerequisites', 'root-ca.yaml', [trust])
+  add_file('infrastructure/configuration/mesh-prerequisites', 'root-ca.yaml', [trust])
   puts 'Prepared pinned public root trust. Independently verify the fingerprint and publish before installing istio-csr.'
 else
   abort 'Usage: ruby ops/pki-handoff.rb sign|trust'

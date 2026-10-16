@@ -31,7 +31,7 @@ when 'pki'
   run('kubectl','-n','crossplane-system','get','configmap','vault-bootstrap-ca','-o','name')
 when 'certificates'
   app('vault-pki')
-  raise 'Export and review verified public root trust first' unless File.exist?("#{ROOT}/configuration/mesh-prerequisites/templates/root-ca.yaml")
+  raise 'Export and review verified public root trust first' unless File.exist?("#{ROOT}/infrastructure/configuration/mesh-prerequisites/templates/root-ca.yaml")
 when 'istio'
   app('cert-manager'); app('vault-issuer'); app('mesh-prerequisites')
   run('kubectl','-n','istio-system','wait','--for=condition=Ready','issuer/vault-istio','--timeout=30s')
