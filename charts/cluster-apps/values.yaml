@@ -49,6 +49,19 @@ services:
       pod-security.kubernetes.io/enforce: privileged
       pod-security.kubernetes.io/audit: privileged
       pod-security.kubernetes.io/warn: privileged
+  - name: netbird
+    releaseName: netbird
+    stage: foundation
+    role: management
+    wave: "-25"
+    path: infrastructure/charts/netbird
+    namespace: netbird
+    valueFiles:
+      - overrides/netbird.yaml
+    namespaceLabels:
+      pod-security.kubernetes.io/enforce: privileged
+      pod-security.kubernetes.io/audit: privileged
+      pod-security.kubernetes.io/warn: privileged
   - name: crossplane
     releaseName: crossplane
     stage: foundation
