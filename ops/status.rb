@@ -50,7 +50,7 @@ applicable.each { |s| line(s, stages[s] ? 'enabled' : 'pending') }
 
 apps = case CLUSTER['role']
        when 'management'
-         %w[longhorn crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment]
+         %w[longhorn netbird crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment]
        else
          %w[cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment]
        end

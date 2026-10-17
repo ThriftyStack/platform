@@ -1,0 +1,18 @@
+{{- if .Values.enabled }}
+# Headless Service required by the StatefulSet; peers do not serve ClusterIP traffic.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "netbird.name" . }}
+  labels:
+    {{- include "netbird.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "netbird.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: status
+      port: 80
+      targetPort: 80
+{{- end }}

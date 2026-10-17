@@ -57,7 +57,7 @@ schemas = lock['vaultProvider']['schemas'].map { |s| YAML.safe_load(File.read("#
 stage_flags = %w[vault pki certificates istio qualification enrollment].flat_map { |s| ['--set', "stages.#{s}=true"] }
 apps = render(HELM, 'template', 'management', CHART, *cluster_profile('management'), *stage_flags).select { |o| o['kind']=='Application' }
 by_name = apps.to_h { |a| [a['metadata']['name'], a] }
-order = %w[longhorn crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment]
+order = %w[longhorn netbird crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment]
 waves = order.map { |name| by_name.fetch(name).dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave').to_i }
 check(waves.each_cons(2).all? { |a,b| a < b }, 'Dependency waves must follow deployment order')
 def ignores?(app, group, kind)
