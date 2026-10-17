@@ -1,0 +1,33 @@
+# Off until the setup-key Secret exists and an operator flips this (or an override).
+enabled: false
+
+image:
+  repository: netbirdio/netbird
+  tag: "0.77.1"
+  pullPolicy: IfNotPresent
+
+# HA routing peers in-cluster (vendor Deployment pattern). Not a hostNetwork
+# DaemonSet: Talos+Cilium and /dev/net/tun are safer as regular pods with caps.
+replicaCount: 2
+
+# Secret must contain key NB_SETUP_KEY. Create out of band from Vault KV
+# infra/net/netbird field management-key (portal setup key, auto-group management).
+setupKeySecretName: netbird-setup-key
+
+hostnamePrefix: mgmt-nb
+
+# Persist /var/lib/netbird so peer identity survives reschedule (Longhorn default).
+stateStorage:
+  size: 128Mi
+  storageClassName: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1

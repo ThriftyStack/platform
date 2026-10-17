@@ -1,0 +1,5 @@
+# Keep disabled until the setup-key Secret exists in namespace netbird.
+# Enable by setting enabled: true after:
+#   kubectl -n netbird create secret generic netbird-setup-key \
+#     --from-literal=NB_SETUP_KEY=<management-key from Vault infra/net/netbird>
+enabled: false
