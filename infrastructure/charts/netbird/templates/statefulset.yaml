@@ -30,14 +30,14 @@ spec:
         - name: netbird
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # Stable peer names (mgmt-nb-0, mgmt-nb-1) for NetBird portal / OpenTofu
-          # data.netbird_peer lookups. Env NB_HOSTNAME cannot interpolate POD_NAME.
+          # Image ENTRYPOINT starts `netbird service run` then `netbird up`.
+          # Only wrap it to set a stable ordinal hostname (mgmt-nb-0, …).
           command: ["/bin/sh", "-c"]
           args:
             - |
               set -euo pipefail
               export NB_HOSTNAME="{{ .Values.hostnamePrefix }}-${POD_NAME##*-}"
-              exec netbird up
+              exec /usr/local/bin/netbird-entrypoint.sh
           env:
             - name: NB_SETUP_KEY
               valueFrom:
@@ -50,6 +50,9 @@ spec:
                   fieldPath: metadata.name
             - name: NB_LOG_LEVEL
               value: info
+            # Avoid requiring /var/log/netbird on a read-only path.
+            - name: NB_LOG_FILE
+              value: console
           securityContext:
             capabilities:
               add:
@@ -66,14 +69,14 @@ spec:
           livenessProbe:
             exec:
               command: ["netbird", "status", "--check", "live"]
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
             exec:
               command: ["netbird", "status", "--check", "ready"]
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
@@ -82,7 +85,7 @@ spec:
               command: ["netbird", "status", "--check", "startup"]
             periodSeconds: 2
             timeoutSeconds: 10
-            failureThreshold: 60
+            failureThreshold: 90
       volumes:
         - name: tun
           hostPath:
