@@ -92,7 +92,11 @@ spec:
             path: /dev/net/tun
             type: CharDevice
   volumeClaimTemplates:
-    - metadata:
+    # apiVersion/kind match what the apiserver stores so Argo does not
+    # report OutOfSync on defaulted fields.
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
         name: state
       spec:
         accessModes: ["ReadWriteOnce"]
