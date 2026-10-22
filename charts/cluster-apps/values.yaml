@@ -174,7 +174,8 @@ services:
     wave: "70"
     path: infrastructure/configuration/mesh-enrollment
     namespace: mesh-test
-  # crossplane-system Secret authentik-git-credentials key .git-credentials.
+  # Argo needs no repo-creds while platform and controlplane stay public.
+  # crossplane-system Secret authentik-git-credentials key .git-credentials (empty file is enough for a public module URL).
   # crossplane-system Secret authentik-gcp-credentials key credentials.
   - name: controlplane-authentik
     stage: foundation
