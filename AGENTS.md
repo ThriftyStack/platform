@@ -8,7 +8,7 @@ Notion is the source of truth for ThriftyStack documentation. Leave the GitHub r
 
 Before you change behavior in this repository, read the Notion page that covers that behavior.
 
-In the same task, update that page. If no page covers the change, add one under the section in the table below. On every page you change, update the line that starts with `Last updated by`. Put the name of the person making the change and the date of the edit on that line. If the page has no such line, add `Last updated by <name> on <YYYY-MM-DD>.` directly under the title.
+In the same task, update that page. If no page covers the change, add one under the section in the table below. On every page you change, keep that page's footer. Write it as `Last updated by: <person or agent> — <what changed>, YYYY-MM-DD`. The name is the person, or Claude Code, Codex, or Cursor. If the page has no footer, add that line at the bottom of the page. For example, `Last updated by: Grok Bot — initial migration from GitHub, 2026-10-21`.
 
 Record a new decision as a new page under [ADRs](https://www.notion.so/400972443c708169b262e47f7c9c56e0).
 
