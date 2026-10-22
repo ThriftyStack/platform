@@ -4,7 +4,7 @@
       "chart": "longhorn",
       "version": "1.13.0",
       "archive": "longhorn-1.13.0.tgz",
-      "url": "https://charts.longhorn.io/longhorn-1.13.0.tgz",
+      "url": "https://github.com/longhorn/charts/releases/download/longhorn-1.13.0/longhorn-1.13.0.tgz",
       "sha256": "e57f010d2a8bcf0da5b8b03ffecf49c5bc35ddc2663588ce8f22b7567b6133ed"
     },
     {
