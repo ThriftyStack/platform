@@ -12,8 +12,12 @@ metadata:
 spec:
   project: {{ $.Values.cluster.id }}
   source:
-    repoURL: https://github.com/ThriftyStack/platform.git
-    targetRevision: main
+    repoURL: {{ .repoURL | default "https://github.com/ThriftyStack/platform.git" }}
+    targetRevision: {{ .targetRevision | default "main" }}
+    {{- if .directory }}
+    directory:
+      recurse: false
+    {{- else }}
     helm:
       releaseName: {{ .releaseName }}
       {{- if .skipTests }}
@@ -24,6 +28,7 @@ spec:
       {{- range .valueFiles }}
       - "../../../clusters/{{ $.Values.cluster.id }}/{{ . }}"
       {{- end }}
+    {{- end }}
     path: {{ .path }}
   destination:
     server: {{ $.Values.cluster.server | quote }}

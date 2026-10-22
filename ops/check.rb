@@ -55,11 +55,38 @@ lock = JSON.parse(File.read("#{ROOT}/dependencies.lock.json"))
 end
 schemas = lock['vaultProvider']['schemas'].map { |s| YAML.safe_load(File.read("#{CACHE}/#{s['file']}"), aliases: true) }
 stage_flags = %w[vault pki certificates istio qualification enrollment].flat_map { |s| ['--set', "stages.#{s}=true"] }
-apps = render(HELM, 'template', 'management', CHART, *cluster_profile('management'), *stage_flags).select { |o| o['kind']=='Application' }
+management_docs = render(HELM, 'template', 'management', CHART, *cluster_profile('management'), *stage_flags)
+apps = management_docs.select { |o| o['kind']=='Application' }
 by_name = apps.to_h { |a| [a['metadata']['name'], a] }
-order = %w[longhorn netbird crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment]
+order = %w[longhorn netbird crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment controlplane-authentik]
 waves = order.map { |name| by_name.fetch(name).dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave').to_i }
 check(waves.each_cons(2).all? { |a,b| a < b }, 'Dependency waves must follow deployment order')
+authentik = by_name.fetch('controlplane-authentik')
+authentik_source = authentik.dig('spec','source')
+check(authentik_source['repoURL'] == 'https://github.com/ThriftyStack/controlplane.git', 'Authentik root must track the controlplane repository')
+check(authentik_source['targetRevision'] == 'main', 'Authentik root tracks main')
+check(authentik_source['path'] == 'deploy/authentik', 'Authentik root path')
+check(authentik_source['directory'] == {'recurse' => false}, 'Authentik root must not recurse')
+check(authentik_source['helm'].nil?, 'Authentik root is a directory, not a Helm chart')
+check(authentik.dig('spec','project') == 'management', 'Authentik root uses the management project')
+check(authentik.dig('spec','destination') == {'server' => 'https://kubernetes.default.svc', 'namespace' => 'crossplane-system'}, 'Authentik root destination')
+check(authentik.dig('spec','syncPolicy','automated') == {'prune' => false, 'selfHeal' => true}, 'Authentik root self-heals and does not prune')
+check(authentik.dig('spec','syncPolicy','syncOptions').include?('ServerSideApply=true'), 'Authentik root uses server-side apply')
+check(authentik.dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i > by_name.fetch('crossplane').dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i, 'Authentik root syncs after Crossplane')
+project = management_docs.find { |o| o['kind']=='AppProject' && o.dig('metadata','name')=='management' }
+check(project, 'Management AppProject must be rendered')
+check(project.dig('spec','sourceRepos') == ['https://github.com/ThriftyStack/platform.git', 'https://github.com/ThriftyStack/controlplane.git'], 'Management project sources platform and controlplane')
+check(project.dig('spec','clusterResourceWhitelist').none? { |r| r.values.include?('*') }, 'No wildcard management cluster privileges')
+check(project.dig('spec','destinations').none? { |d| d['namespace'] == 'kube-system' }, 'Management project must not permit kube-system')
+check(project.dig('spec','destinations').any? { |d| d == {'server' => 'https://kubernetes.default.svc', 'namespace' => 'crossplane-system'} }, 'Management project permits crossplane-system')
+check(project.dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i < waves.first, 'Management project syncs before platform Applications')
+app_namespaces = apps.map { |a| a.dig('spec','destination','namespace') }.uniq
+project_namespaces = project.dig('spec','destinations').map { |d| d['namespace'] }
+check(app_namespaces.all? { |ns| project_namespaces.include?(ns) }, 'Management project must allow every Application destination')
+allow = project.dig('spec','clusterResourceWhitelist').map { |r| [r['group'], r['kind']] }
+check(allow.include?(['opentofu.upbound.io', 'ProviderConfig']), 'Authentik ProviderConfig is cluster-scoped')
+check(allow.include?(['pkg.crossplane.io', 'Provider']), 'Provider packages are cluster-scoped')
+check(allow.include?(['pkg.crossplane.io', 'DeploymentRuntimeConfig']), 'Provider runtimes are cluster-scoped')
 def ignores?(app, group, kind)
   (app.dig('spec', 'ignoreDifferences') || []).any? { |d| d['group'] == group && d['kind'] == kind }
 end
@@ -82,6 +109,10 @@ apps.each do |app|
   check(!app.dig('metadata','finalizers'), 'No cascading application deletion')
   check(app.dig('spec','syncPolicy','automated','prune') == false, 'No automated infrastructure pruning')
   source = app.dig('spec','source')
+  if source['directory']
+    check(app.dig('metadata','name') == 'controlplane-authentik', 'Only the Authentik root may use a directory source')
+    next
+  end
   check(source['path'].start_with?('infrastructure/'), 'Platform services must remain separate from workload application charts')
   chart = "#{ROOT}/#{source['path']}"
   values = source.dig('helm','valueFiles').flat_map { |f| ['-f',File.expand_path(f, chart)] }
@@ -98,6 +129,30 @@ apps.each do |app|
     canonical = dependency.map { |d| %w[name version repository].to_h { |k| [k,d.fetch(k)] } }
     expected = 'sha256:'+Digest::SHA256.hexdigest(JSON.generate([canonical,chart_lock['dependencies']]))
     check(chart_lock['digest']==expected, 'Helm dependency lock digest mismatch')
+  end
+end
+cluster_groups = {
+  'Namespace' => '',
+  'CustomResourceDefinition' => 'apiextensions.k8s.io',
+  'ClusterRole' => 'rbac.authorization.k8s.io',
+  'ClusterRoleBinding' => 'rbac.authorization.k8s.io',
+  'MutatingWebhookConfiguration' => 'admissionregistration.k8s.io',
+  'ValidatingWebhookConfiguration' => 'admissionregistration.k8s.io',
+  'ValidatingAdmissionPolicy' => 'admissionregistration.k8s.io',
+  'ValidatingAdmissionPolicyBinding' => 'admissionregistration.k8s.io',
+  'PriorityClass' => 'scheduling.k8s.io',
+  'Provider' => 'pkg.crossplane.io',
+  'DeploymentRuntimeConfig' => 'pkg.crossplane.io'
+}
+rendered.each_value do |objects|
+  objects.each do |object|
+    group = object['apiVersion'].to_s.include?('/') ? object['apiVersion'].split('/')[0] : ''
+    if object['kind'] == 'ProviderConfig'
+      check(allow.include?([group, 'ProviderConfig']), "Management project must allow #{group}/ProviderConfig")
+    elsif cluster_groups.key?(object['kind'])
+      check(cluster_groups[object['kind']] == group, "Unexpected API group for #{object['kind']}")
+      check(allow.include?([group, object['kind']]), "Management project must allow #{group}/#{object['kind']}")
+    end
   end
 end
 def configuration(name)
