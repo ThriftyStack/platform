@@ -12,7 +12,8 @@ cache.mkdir(parents=True, exist_ok=True)
 lock = json.loads((root / 'dependencies.lock.json').read_text())
 for artifact in lock['charts'] + lock['vaultProvider']['schemas'] + lock.get('validationCharts', []):
     path = cache / artifact.get('archive', artifact.get('file'))
-    data = path.read_bytes() if path.exists() else urllib.request.urlopen(artifact['url'], timeout=60).read()
+    request = urllib.request.Request(artifact['url'], headers={'User-Agent': 'thrifty-platform-fetch'})
+    data = path.read_bytes() if path.exists() else urllib.request.urlopen(request, timeout=60).read()
     if hashlib.sha256(data).hexdigest() != artifact['sha256']:
         raise ValueError(f'Hash mismatch: {path.name}; never replace the lock implicitly')
     path.write_bytes(data)
