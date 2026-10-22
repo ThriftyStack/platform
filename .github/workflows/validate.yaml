@@ -18,13 +18,15 @@ jobs:
     name: GitOps contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      CHART_CACHE: ${{ runner.temp }}/chart-cache
-      HELM: ${{ runner.temp }}/helm/linux-amd64/helm
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+      - name: Set chart cache and Helm paths
+        run: |
+          set -euo pipefail
+          echo "CHART_CACHE=${RUNNER_TEMP}/chart-cache" >> "$GITHUB_ENV"
+          echo "HELM=${RUNNER_TEMP}/helm/linux-amd64/helm" >> "$GITHUB_ENV"
       - name: Install checksum-pinned Helm
         env:
           HELM_ARCHIVE_SHA256: a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496
