@@ -44,6 +44,9 @@ spec:
     syncOptions:
     - CreateNamespace=true
     - ServerSideApply=true
+    {{- range .syncOptions }}
+    - {{ . }}
+    {{- end }}
     retry:
       limit: 5
       backoff:

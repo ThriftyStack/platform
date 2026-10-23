@@ -186,3 +186,5 @@ services:
     repoURL: https://github.com/ThriftyStack/controlplane.git
     targetRevision: main
     directory: true
+    syncOptions:
+      - SkipDryRunOnMissingResource=true

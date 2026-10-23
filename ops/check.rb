@@ -54,6 +54,7 @@ lock = JSON.parse(File.read("#{ROOT}/dependencies.lock.json"))
   check(Digest::SHA256.file(file).hexdigest == artifact['sha256'], "Locked artifact mismatch #{file}")
 end
 schemas = lock['vaultProvider']['schemas'].map { |s| YAML.safe_load(File.read("#{CACHE}/#{s['file']}"), aliases: true) }
+crd_scope = schemas.to_h { |s| [[s.dig('spec', 'group'), s.dig('spec', 'names', 'kind')], s.dig('spec', 'scope')] }
 stage_flags = %w[vault pki certificates istio qualification enrollment].flat_map { |s| ['--set', "stages.#{s}=true"] }
 management_docs = render(HELM, 'template', 'management', CHART, *cluster_profile('management'), *stage_flags)
 apps = management_docs.select { |o| o['kind']=='Application' }
@@ -72,6 +73,7 @@ check(authentik.dig('spec','project') == 'management', 'Authentik root uses the 
 check(authentik.dig('spec','destination') == {'server' => 'https://kubernetes.default.svc', 'namespace' => 'crossplane-system'}, 'Authentik root destination')
 check(authentik.dig('spec','syncPolicy','automated') == {'prune' => false, 'selfHeal' => true}, 'Authentik root self-heals and does not prune')
 check(authentik.dig('spec','syncPolicy','syncOptions').include?('ServerSideApply=true'), 'Authentik root uses server-side apply')
+check(authentik.dig('spec','syncPolicy','syncOptions').include?('SkipDryRunOnMissingResource=true'), 'Authentik root must apply the OpenTofu provider before its CRDs exist')
 check(authentik.dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i > by_name.fetch('crossplane').dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i, 'Authentik root syncs after Crossplane')
 project = management_docs.find { |o| o['kind']=='AppProject' && o.dig('metadata','name')=='management' }
 check(project, 'Management AppProject must be rendered')
@@ -147,11 +149,12 @@ cluster_groups = {
 rendered.each_value do |objects|
   objects.each do |object|
     group = object['apiVersion'].to_s.include?('/') ? object['apiVersion'].split('/')[0] : ''
-    if object['kind'] == 'ProviderConfig'
-      check(allow.include?([group, 'ProviderConfig']), "Management project must allow #{group}/ProviderConfig")
-    elsif cluster_groups.key?(object['kind'])
-      check(cluster_groups[object['kind']] == group, "Unexpected API group for #{object['kind']}")
-      check(allow.include?([group, object['kind']]), "Management project must allow #{group}/#{object['kind']}")
+    kind = object['kind']
+    if cluster_groups.key?(kind)
+      check(cluster_groups[kind] == group, "Unexpected API group for #{kind}")
+      check(allow.include?([group, kind]), "Management project must allow #{group}/#{kind}")
+    elsif crd_scope[[group, kind]] == 'Cluster'
+      check(allow.include?([group, kind]), "Management project must allow #{group}/#{kind}")
     end
   end
 end
