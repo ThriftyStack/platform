@@ -37,5 +37,15 @@ spec:
     - {group: pkg.crossplane.io, kind: Provider}
     - {group: pkg.crossplane.io, kind: DeploymentRuntimeConfig}
     - {group: vault.upbound.io, kind: ProviderConfig}
+    - {group: vault.vault.upbound.io, kind: Mount}
+    - {group: vault.vault.upbound.io, kind: Policy}
+    - {group: kubernetes.vault.upbound.io, kind: AuthBackendConfig}
+    - {group: kubernetes.vault.upbound.io, kind: AuthBackendRole}
+    - {group: pki.vault.upbound.io, kind: SecretBackendRootCert}
+    - {group: pki.vault.upbound.io, kind: SecretBackendIntermediateCertRequest}
+    - {group: pki.vault.upbound.io, kind: SecretBackendRootSignIntermediate}
+    - {group: pki.vault.upbound.io, kind: SecretBackendIntermediateSetSigned}
+    - {group: pki.vault.upbound.io, kind: SecretBackendRole}
     - {group: opentofu.upbound.io, kind: ProviderConfig}
+    - {group: opentofu.upbound.io, kind: Workspace}
 {{- end }}
