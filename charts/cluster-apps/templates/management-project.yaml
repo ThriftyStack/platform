@@ -47,4 +47,5 @@ spec:
     - {group: pki.vault.upbound.io, kind: SecretBackendIntermediateSetSigned}
     - {group: pki.vault.upbound.io, kind: SecretBackendRole}
     - {group: opentofu.upbound.io, kind: ProviderConfig}
+    - {group: opentofu.upbound.io, kind: Workspace}
 {{- end }}

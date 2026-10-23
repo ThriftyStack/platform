@@ -1,10 +1,14 @@
 #!/usr/bin/env ruby
 # Offline contracts and exact artifact rendering; no cluster calls.
+# The Authentik allowlist also reads public controlplane main and the
+# provider-opentofu CRDs for the package version that root pins.
 require 'yaml'
 require 'json'
 require 'digest'
 require 'open3'
 require 'tempfile'
+require 'net/http'
+require 'uri'
 ROOT = File.expand_path('..', __dir__)
 CACHE = ENV.fetch('CHART_CACHE')
 HELM = ENV.fetch('HELM', 'helm')
@@ -87,8 +91,47 @@ project_namespaces = project.dig('spec','destinations').map { |d| d['namespace']
 check(app_namespaces.all? { |ns| project_namespaces.include?(ns) }, 'Management project must allow every Application destination')
 allow = project.dig('spec','clusterResourceWhitelist').map { |r| [r['group'], r['kind']] }
 check(allow.include?(['opentofu.upbound.io', 'ProviderConfig']), 'Authentik ProviderConfig is cluster-scoped')
+check(allow.include?(['opentofu.upbound.io', 'Workspace']), 'Authentik Workspace is cluster-scoped')
 check(allow.include?(['pkg.crossplane.io', 'Provider']), 'Provider packages are cluster-scoped')
 check(allow.include?(['pkg.crossplane.io', 'DeploymentRuntimeConfig']), 'Provider runtimes are cluster-scoped')
+def fetch(url)
+  uri = URI(url)
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.use_ssl = uri.scheme == 'https'
+  http.open_timeout = 20
+  http.read_timeout = 30
+  request = Net::HTTP::Get.new(uri)
+  request['User-Agent'] = 'thrifty-platform-fetch'
+  request['Accept'] = 'application/vnd.github+json'
+  token = ENV['GITHUB_TOKEN'] || ENV['GH_TOKEN']
+  request['Authorization'] = "Bearer #{token}" if token && !token.empty?
+  response = http.request(request)
+  raise "GET #{url} failed: #{response.code}" unless response.is_a?(Net::HTTPSuccess)
+  response.body
+end
+authentik_docs = JSON.parse(fetch('https://api.github.com/repos/ThriftyStack/controlplane/contents/deploy/authentik?ref=main')).select { |entry| entry['name'].end_with?('.yaml') }.flat_map do |entry|
+  documents(fetch(entry['download_url']))
+end
+authentik_docs.select! { |object| object.is_a?(Hash) && object['apiVersion'] && object['kind'] }
+provider_package = authentik_docs.find { |object| object['kind'] == 'Provider' }.dig('spec', 'package')
+check(provider_package.start_with?('xpkg.upbound.io/upbound/provider-opentofu:'), 'Authentik provider package must be provider-opentofu')
+provider_version = provider_package.split(':', 2).last
+check(provider_version.match?(/\Av\d+\.\d+\.\d+\z/), 'Authentik provider version must be a release tag')
+opentofu_scope = JSON.parse(fetch("https://api.github.com/repos/upbound/provider-opentofu/contents/package/crds?ref=#{provider_version}")).select { |entry| entry['name'].start_with?('opentofu.upbound.io_') }.to_h do |entry|
+  crd = YAML.safe_load(fetch(entry['download_url']), aliases: true)
+  [[crd.dig('spec', 'group'), crd.dig('spec', 'names', 'kind')], crd.dig('spec', 'scope')]
+end
+pkg_scope = {
+  ['pkg.crossplane.io', 'Provider'] => 'Cluster',
+  ['pkg.crossplane.io', 'DeploymentRuntimeConfig'] => 'Cluster'
+}
+authentik_docs.each do |object|
+  group = object['apiVersion'].include?('/') ? object['apiVersion'].split('/')[0] : ''
+  kind = object['kind']
+  scope = pkg_scope[[group, kind]] || opentofu_scope[[group, kind]]
+  check(scope, "No scope for controlplane #{group}/#{kind} at provider-opentofu #{provider_version}")
+  check(allow.include?([group, kind]), "Management project must allow #{group}/#{kind}") if scope == 'Cluster'
+end
 def ignores?(app, group, kind)
   (app.dig('spec', 'ignoreDifferences') || []).any? { |d| d['group'] == group && d['kind'] == kind }
 end
