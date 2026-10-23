@@ -66,7 +66,7 @@ Dir.mktmpdir('fleet-template') do |directory|
 end
 check(all.none? { |o| o['kind']=='AppProject' && o.dig('metadata','name')=='oci' }, 'No OCI access grant by default')
 projects=render(HELM,'template','approved',CHART,*cluster_profile('management'),'--set','spokeProjects.oci.enabled=true','--set','spokeProjects.oci.server=https://oci-api.invalid:6443','--set','spokeProjects.oci.namespaces={cert-manager,istio-system,mesh-test}')
-project=projects.find { |o| o['kind']=='AppProject' }
+project=projects.find { |o| o['kind']=='AppProject' && o.dig('metadata','name')=='oci' }
 check(project.dig('spec','sourceRepos')==[YAML.safe_load(File.read("#{ROOT}/clusters/management/values.yaml")).dig('fleet','repository')], 'Spoke projects source only the platform repository')
 check(project.dig('spec','clusterResourceWhitelist').none? { |r| r.values.include?('*') }, 'No wildcard spoke cluster privileges')
 check(project.dig('spec','destinations').all? { |d| d['server']=='https://oci-api.invalid:6443' || d=={'server'=>'https://kubernetes.default.svc','namespace'=>'argocd'} }, 'Explicit spoke destination policy')
