@@ -283,6 +283,18 @@ remote_pki=render(HELM,'template','oci-pki',"#{ROOT}/infrastructure/configuratio
 check(remote_pki.none? { |o| %w[SecretBackendRootCert ProviderConfig AuthBackendConfig].include?(o['kind']) }, 'Remote PKI must reuse central provider/root and cannot use the local reviewer')
 check(remote_pki.find { |o| o['kind']=='SecretBackendRole' }.dig('spec','forProvider','allowedUriSans')==['spiffe://oci.thriftystack.internal/ns/*/sa/*'], 'OCI intermediate URI constraint')
 check(remote_pki.find { |o| o['kind']=='SecretBackendRole' }.dig('metadata','name')=='oci-istio', 'Central PKI resources must not collide across clusters')
+authentik_role = rendered.fetch('vault-pki').find { |o| o['kind']=='AuthBackendRole' && o.dig('metadata','name')=='authentik-tofu' }
+check(authentik_role, 'Management Vault must issue an Authentik OpenTofu Kubernetes role')
+check(authentik_role.dig('spec','forProvider','backend')=='kubernetes-management', 'Authentik OpenTofu role uses the management Kubernetes auth mount')
+check(authentik_role.dig('spec','forProvider','boundServiceAccountNames')==['provider-opentofu'], 'Authentik OpenTofu role is bound to the OpenTofu provider')
+check(authentik_role.dig('spec','forProvider','boundServiceAccountNamespaces')==['crossplane-system'], 'Authentik OpenTofu role is bound to crossplane-system')
+check(authentik_role.dig('spec','forProvider','audience')=='vault://crossplane-system/authentik-tofu', 'Authentik OpenTofu role audience must match the projected token')
+check(authentik_role.dig('spec','forProvider','tokenPolicies')==['authentik-tofu'] && authentik_role.dig('spec','forProvider','tokenNoDefaultPolicy')==true, 'Authentik OpenTofu tokens carry only their named policy')
+check(authentik_role.dig('spec','forProvider','tokenTtl')==3600 && authentik_role.dig('spec','forProvider','tokenMaxTtl')==3600, 'Authentik OpenTofu tokens expire within an hour')
+authentik_policy = rendered.fetch('vault-pki').find { |o| o['kind']=='Policy' && o.dig('metadata','name')=='authentik-tofu' }
+check(authentik_policy, 'Management Vault must define the Authentik OpenTofu policy')
+check(authentik_policy.dig('spec','forProvider','policy').include?('path "infra/data/authentik"') && authentik_policy.dig('spec','forProvider','policy').include?('path "auth/token/create"'), 'Authentik OpenTofu policy reads its KV paths and can create a child token')
+check(remote_pki.none? { |o| o.dig('metadata','name')=='authentik-tofu' }, 'Spoke PKI must not grant the Authentik OpenTofu role')
 # Namespace admission, CSR address and storage policy selectors must still match actual dependency names.
 check(sts.dig('metadata','name')=='vault' && sts.dig('spec','template','metadata','labels','app.kubernetes.io/name')=='vault','Wrapper must preserve Vault service and pod identities')
 check(rendered['cert-manager'].any? { |o| o['kind']=='ServiceAccount' && o.dig('metadata','name')=='cert-manager' }, 'Vault token RBAC must bind the real controller SA')

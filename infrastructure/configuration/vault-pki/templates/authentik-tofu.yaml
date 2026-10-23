@@ -1,0 +1,57 @@
+{{ if eq .Values.cluster.id "management" }}
+apiVersion: vault.vault.upbound.io/v1alpha1
+kind: Policy
+metadata:
+  name: authentik-tofu
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    argocd.argoproj.io/sync-wave: "-11"
+spec:
+  deletionPolicy: Orphan
+  managementPolicies:
+  - Observe
+  - Create
+  - Update
+  forProvider:
+    name: authentik-tofu
+    policy: |
+      path "infra/data/authentik" { capabilities = ["read"] }
+      path "infra/data/authentik/*" { capabilities = ["read"] }
+      path "infra/data/proxmox-oidc" { capabilities = ["read"] }
+      path "infra/metadata/authentik" { capabilities = ["read"] }
+      path "infra/metadata/authentik/*" { capabilities = ["read"] }
+      path "infra/metadata/proxmox-oidc" { capabilities = ["read"] }
+      path "auth/token/lookup-self" { capabilities = ["read"] }
+      path "auth/token/create" { capabilities = ["update"] }
+  providerConfigRef:
+    name: {{ .Values.cluster.providerConfig }}
+---
+apiVersion: kubernetes.vault.upbound.io/v1alpha1
+kind: AuthBackendRole
+metadata:
+  name: authentik-tofu
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  deletionPolicy: Orphan
+  managementPolicies:
+  - Observe
+  - Create
+  - Update
+  forProvider:
+    backend: {{ .Values.cluster.authMount }}
+    roleName: authentik-tofu
+    boundServiceAccountNames:
+    - provider-opentofu
+    boundServiceAccountNamespaces:
+    - crossplane-system
+    audience: vault://crossplane-system/authentik-tofu
+    tokenPolicies:
+    - authentik-tofu
+    tokenTtl: 3600
+    tokenMaxTtl: 3600
+    tokenNoDefaultPolicy: true
+  providerConfigRef:
+    name: {{ .Values.cluster.providerConfig }}
+{{ end }}
