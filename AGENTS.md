@@ -24,7 +24,7 @@ Read the page that matches the change, then update that same page.
 | [Vault](https://www.notion.so/400972443c70813db431fc0bc32215e2) | `infrastructure/charts/vault`, `infrastructure/configuration/vault-provider`, `vault-pki`, `vault-issuer`, or ceremony stages `vault`, `pki`, or `certificates`. |
 | [NetBird](https://www.notion.so/400972443c70815fb7b7db1baf120d43) | `infrastructure/charts/netbird` or `clusters/management/overrides/netbird.yaml`. |
 | [Disaster Recovery](https://www.notion.so/400972443c70814e9ebccf1806f12504) | Recovery shares, break-glass Vault recovery, or the protected Vault storage binding. |
-| [Authentik](https://www.notion.so/400972443c7081d2885dcba7e839fedf) | Identity for this platform, including Authentik. Update this page when the change affects that dependency. Leave it unchanged for Vault, NetBird, mesh, and ceremony edits that do not change identity. |
+| [Authentik](https://www.notion.so/400972443c7081d2885dcba7e839fedf) | Authentik runtime chart `infrastructure/charts/authentik`, stage `authentik`, or identity dependency changes. Leave unchanged for Vault, NetBird, mesh, and ceremony edits that do not touch Authentik. |
 | [Systems](https://www.notion.so/400972443c7081658761c83b9fc2de16) | A new system. Add the new page under Systems. Systems is the parent of Authentik, Vault, and NetBird. |
 | [ADRs](https://www.notion.so/400972443c708169b262e47f7c9c56e0) | A new decision. Add the ADR here. |
 

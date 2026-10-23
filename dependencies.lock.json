@@ -48,6 +48,13 @@
       "archive": "vault-0.34.1.tgz",
       "url": "https://helm.releases.hashicorp.com/vault-0.34.1.tgz",
       "sha256": "df4c37fac32496892ff1e1d6fd7954d3a402cc7b1b2b4c2226af11b8a57564c4"
+    },
+    {
+      "chart": "authentik",
+      "version": "2026.5.6",
+      "archive": "authentik-2026.5.6.tgz",
+      "url": "https://github.com/goauthentik/helm/releases/download/authentik-2026.5.6/authentik-2026.5.6.tgz",
+      "sha256": "c14732299b5f54910ac40ff0f9a4b47a2905924b1381ab68b1f20c4eddc40eba"
     }
   ],
   "vaultProvider": {

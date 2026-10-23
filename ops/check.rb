@@ -59,11 +59,11 @@ lock = JSON.parse(File.read("#{ROOT}/dependencies.lock.json"))
 end
 schemas = lock['vaultProvider']['schemas'].map { |s| YAML.safe_load(File.read("#{CACHE}/#{s['file']}"), aliases: true) }
 crd_scope = schemas.to_h { |s| [[s.dig('spec', 'group'), s.dig('spec', 'names', 'kind')], s.dig('spec', 'scope')] }
-stage_flags = %w[vault pki certificates istio qualification enrollment].flat_map { |s| ['--set', "stages.#{s}=true"] }
+stage_flags = %w[vault pki certificates istio qualification enrollment authentik].flat_map { |s| ['--set', "stages.#{s}=true"] }
 management_docs = render(HELM, 'template', 'management', CHART, *cluster_profile('management'), *stage_flags)
 apps = management_docs.select { |o| o['kind']=='Application' }
 by_name = apps.to_h { |a| [a['metadata']['name'], a] }
-order = %w[longhorn netbird crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment controlplane-authentik]
+order = %w[longhorn netbird crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik controlplane-authentik]
 waves = order.map { |name| by_name.fetch(name).dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave').to_i }
 check(waves.each_cons(2).all? { |a,b| a < b }, 'Dependency waves must follow deployment order')
 authentik = by_name.fetch('controlplane-authentik')
@@ -295,6 +295,12 @@ authentik_policy = rendered.fetch('vault-pki').find { |o| o['kind']=='Policy' &&
 check(authentik_policy, 'Management Vault must define the Authentik OpenTofu policy')
 check(authentik_policy.dig('spec','forProvider','policy').include?('path "infra/data/authentik"') && authentik_policy.dig('spec','forProvider','policy').include?('path "auth/token/create"'), 'Authentik OpenTofu policy reads its KV paths and can create a child token')
 check(remote_pki.none? { |o| o.dig('metadata','name')=='authentik-tofu' }, 'Spoke PKI must not grant the Authentik OpenTofu role')
+authentik_app = by_name.fetch('authentik')
+check(authentik_app.dig('spec','source','path')=='infrastructure/charts/authentik', 'Authentik runtime chart path')
+check(authentik_app.dig('spec','destination','namespace')=='authentik', 'Authentik runtime deploys to namespace authentik')
+check(authentik_app.dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i < by_name.fetch('controlplane-authentik').dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i, 'Authentik runtime must sync before identity Workspace')
+authentik_runtime = rendered.fetch('authentik')
+check(authentik_runtime.any? { |o| o['kind']=='Service' && o.dig('spec','type')=='NodePort' && (o.dig('spec','ports')||[]).any? { |p| p['nodePort']==30080 } }, 'Authentik server exposes HTTP NodePort 30080 for the Cloudflare tunnel')
 # Namespace admission, CSR address and storage policy selectors must still match actual dependency names.
 check(sts.dig('metadata','name')=='vault' && sts.dig('spec','template','metadata','labels','app.kubernetes.io/name')=='vault','Wrapper must preserve Vault service and pod identities')
 check(rendered['cert-manager'].any? { |o| o['kind']=='ServiceAccount' && o.dig('metadata','name')=='cert-manager' }, 'Vault token RBAC must bind the real controller SA')

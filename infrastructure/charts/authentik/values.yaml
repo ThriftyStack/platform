@@ -1,0 +1,63 @@
+---
+# Inert until a cluster profile supplies identity and stage flags.
+# Secrets: create Secret authentik-credentials in namespace authentik before sync.
+# Keys (envFrom): AUTHENTIK_SECRET_KEY, AUTHENTIK_POSTGRESQL__HOST,
+# AUTHENTIK_POSTGRESQL__USER, AUTHENTIK_POSTGRESQL__NAME, AUTHENTIK_POSTGRESQL__PASSWORD.
+# Also include postgresql-password for the Bitnami/Postgres subchart auth.existingSecret.
+authentik:
+  authentik:
+    enabled: true
+    log_level: info
+    secret_key: ""
+    existingSecret:
+      secretName: authentik-credentials
+    error_reporting:
+      enabled: false
+    postgresql:
+      host: "{{ .Release.Name }}-postgresql"
+      name: authentik
+      user: authentik
+      password: ""
+      port: 5432
+  server:
+    replicas: 1
+    service:
+      type: NodePort
+      nodePortHttp: 30080
+      nodePortHttps: 30443
+      servicePortHttp: 80
+      servicePortHttps: 443
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+  worker:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+  postgresql:
+    enabled: true
+    auth:
+      username: authentik
+      database: authentik
+      existingSecret: authentik-credentials
+      secretKeys:
+        userPasswordKey: postgresql-password
+    primary:
+      persistence:
+        enabled: true
+        storageClass: longhorn
+        size: 10Gi
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 512Mi
+

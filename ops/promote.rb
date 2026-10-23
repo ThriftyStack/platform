@@ -4,7 +4,7 @@ require 'yaml'
 require 'json'
 require 'open3'
 ROOT = File.expand_path('..', __dir__)
-STAGES = %w[vault pki certificates istio qualification enrollment].freeze
+STAGES = %w[vault pki certificates istio qualification enrollment authentik].freeze
 require_relative 'cluster'
 def app(name)
   o = JSON.parse(run_argo('kubectl', '-n', 'argocd', 'get', 'application', application_name(name), '-o', 'json'))

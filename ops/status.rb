@@ -4,7 +4,7 @@ require 'yaml'
 require 'json'
 require 'open3'
 ROOT = File.expand_path('..', __dir__)
-STAGES = %w[vault pki certificates istio qualification enrollment].freeze
+STAGES = %w[vault pki certificates istio qualification enrollment authentik].freeze
 require_relative 'cluster'
 
 def try_run(*args)
@@ -50,7 +50,7 @@ applicable.each { |s| line(s, stages[s] ? 'enabled' : 'pending') }
 
 apps = case CLUSTER['role']
        when 'management'
-         %w[longhorn netbird crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment controlplane-authentik]
+         %w[longhorn netbird crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik controlplane-authentik]
        else
          %w[cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment]
        end

@@ -10,11 +10,11 @@ status:
 	ruby ops/status.rb
 
 promote:
-	@test -n "$(STAGE)" || (echo 'Set STAGE=<vault|pki|certificates|istio|qualification|enrollment>'; exit 1)
+	@test -n "$(STAGE)" || (echo 'Set STAGE=<vault|pki|certificates|istio|qualification|enrollment|authentik>'; exit 1)
 	ruby ops/promote.rb $(STAGE)
 
 promote-pr:
-	@test -n "$(STAGE)" || (echo 'Set STAGE=<vault|pki|certificates|istio|qualification|enrollment>'; exit 1)
+	@test -n "$(STAGE)" || (echo 'Set STAGE=<vault|pki|certificates|istio|qualification|enrollment|authentik>'; exit 1)
 	ruby ops/promote-pr.rb $(STAGE)
 
 pki-sign:

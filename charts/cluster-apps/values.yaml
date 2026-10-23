@@ -28,6 +28,7 @@ stages:
   istio: false
   qualification: false
   enrollment: false
+  authentik: false
 pkiClusters: []
 fleet:
   enabled: false
@@ -174,6 +175,13 @@ services:
     wave: "70"
     path: infrastructure/configuration/mesh-enrollment
     namespace: mesh-test
+  - name: authentik
+    releaseName: authentik
+    stage: authentik
+    role: management
+    wave: "75"
+    path: infrastructure/charts/authentik
+    namespace: authentik
   # Argo needs no repo-creds while platform and controlplane stay public.
   # crossplane-system Secret authentik-git-credentials key .git-credentials (empty file is enough for a public module URL).
   # crossplane-system Secret authentik-gcp-credentials key credentials.
