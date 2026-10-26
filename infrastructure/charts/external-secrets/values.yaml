@@ -1,0 +1,62 @@
+---
+external-secrets:
+  # Lease follows the pod namespace (controller-runtime v0.25). Do not set a kube-system namespace.
+  leaderElect: true
+  replicaCount: 2
+  installCRDs: true
+  crds:
+    conversion:
+      enabled: false
+  openshiftFinalizers: false
+  bitwarden-sdk-server:
+    enabled: false
+  global:
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 384Mi
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  webhook:
+    replicaCount: 2
+    certManager:
+      enabled: false
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 384Mi
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+  certController:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 384Mi
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+  extraObjects:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: oke-vault-listener-ca
+        namespace: external-secrets
+        labels:
+          thriftystack.io/placeholder: vault-listener-ca
+        annotations:
+          thriftystack.io/source: out-of-band
+      data:
+        ca.crt: PLACEHOLDER_NOT_A_CERTIFICATE

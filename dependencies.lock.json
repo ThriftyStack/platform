@@ -55,6 +55,20 @@
       "archive": "authentik-2026.5.6.tgz",
       "url": "https://github.com/goauthentik/helm/releases/download/authentik-2026.5.6/authentik-2026.5.6.tgz",
       "sha256": "c14732299b5f54910ac40ff0f9a4b47a2905924b1381ab68b1f20c4eddc40eba"
+    },
+    {
+      "chart": "external-secrets",
+      "version": "2.14.0",
+      "archive": "external-secrets-2.14.0.tgz",
+      "url": "https://github.com/external-secrets/external-secrets/releases/download/helm-chart-2.14.0/external-secrets-2.14.0.tgz",
+      "sha256": "0a6d9e91b1ff50adfdbf24b50b582babfa7c5b7df42b21974ca4b3fb88ee5e34"
+    },
+    {
+      "chart": "reloader",
+      "version": "2.2.18",
+      "archive": "reloader-2.2.18.tgz",
+      "url": "https://stakater.github.io/stakater-charts/reloader-2.2.18.tgz",
+      "sha256": "5eb4576ba75a0e165897e8a98a6ffef15d68939430da6eb8fe80796bba75cb17"
     }
   ],
   "vaultProvider": {

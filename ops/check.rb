@@ -9,6 +9,7 @@ require 'open3'
 require 'tempfile'
 require 'net/http'
 require 'uri'
+require_relative 'stages'
 ROOT = File.expand_path('..', __dir__)
 CACHE = ENV.fetch('CHART_CACHE')
 HELM = ENV.fetch('HELM', 'helm')
@@ -59,11 +60,11 @@ lock = JSON.parse(File.read("#{ROOT}/dependencies.lock.json"))
 end
 schemas = lock['vaultProvider']['schemas'].map { |s| YAML.safe_load(File.read("#{CACHE}/#{s['file']}"), aliases: true) }
 crd_scope = schemas.to_h { |s| [[s.dig('spec', 'group'), s.dig('spec', 'names', 'kind')], s.dig('spec', 'scope')] }
-stage_flags = %w[vault pki certificates istio qualification enrollment authentik].flat_map { |s| ['--set', "stages.#{s}=true"] }
+stage_flags = Ceremony::PROMOTABLE.flat_map { |s| ['--set', "stages.#{s}=true"] }
 management_docs = render(HELM, 'template', 'management', CHART, *cluster_profile('management'), *stage_flags)
 apps = management_docs.select { |o| o['kind']=='Application' }
 by_name = apps.to_h { |a| [a['metadata']['name'], a] }
-order = %w[longhorn netbird crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik controlplane-authentik]
+order = %w[longhorn netbird crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik controlplane-authentik]
 waves = order.map { |name| by_name.fetch(name).dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave').to_i }
 check(waves.each_cons(2).all? { |a,b| a < b }, 'Dependency waves must follow deployment order')
 authentik = by_name.fetch('controlplane-authentik')
@@ -90,6 +91,7 @@ app_namespaces = apps.map { |a| a.dig('spec','destination','namespace') }.uniq
 project_namespaces = project.dig('spec','destinations').map { |d| d['namespace'] }
 check(app_namespaces.all? { |ns| project_namespaces.include?(ns) }, 'Management project must allow every Application destination')
 allow = project.dig('spec','clusterResourceWhitelist').map { |r| [r['group'], r['kind']] }
+check(allow.none? { |group, _kind| group == 'external-secrets.io' }, 'Management allowlist contains no external-secrets.io group')
 check(allow.include?(['opentofu.upbound.io', 'ProviderConfig']), 'Authentik ProviderConfig is cluster-scoped')
 check(allow.include?(['opentofu.upbound.io', 'Workspace']), 'Authentik Workspace is cluster-scoped')
 check(allow.include?(['pkg.crossplane.io', 'Provider']), 'Provider packages are cluster-scoped')
@@ -139,6 +141,15 @@ check(ignores?(by_name.fetch('vault-pki'), 'vault.upbound.io', 'ProviderConfig')
 check(ignores?(by_name.fetch('istio-base'), 'admissionregistration.k8s.io', 'ValidatingWebhookConfiguration'), 'istio-base must ignore validating webhook drift')
 check(ignores?(by_name.fetch('istiod'), 'admissionregistration.k8s.io', 'ValidatingWebhookConfiguration'), 'istiod must ignore validating webhook drift')
 check(ignores?(by_name.fetch('istiod'), 'admissionregistration.k8s.io', 'MutatingWebhookConfiguration'), 'istiod must ignore mutating webhook drift')
+eso_app = by_name.fetch('external-secrets')
+webhook_ignore = (eso_app.dig('spec', 'ignoreDifferences') || []).find { |d| d['group'] == 'admissionregistration.k8s.io' && d['kind'] == 'ValidatingWebhookConfiguration' }
+check(webhook_ignore && (webhook_ignore['jqPathExpressions'] || []).include?('.webhooks[]?.clientConfig.caBundle'), 'external-secrets must ignore webhook caBundle drift')
+secret_ignore = (eso_app.dig('spec', 'ignoreDifferences') || []).find { |d| d['group'] == '' && d['kind'] == 'Secret' }
+check(secret_ignore && secret_ignore['name'] == 'external-secrets-webhook' && (secret_ignore['jsonPointers'] || []).include?('/data'), 'external-secrets must ignore webhook Secret data')
+%w[external-secrets reloader].each do |name|
+  labels = by_name.fetch(name).dig('spec', 'syncPolicy', 'managedNamespaceMetadata', 'labels')
+  check(labels == { 'istio-injection' => 'disabled' }, "#{name} namespace label is only istio-injection disabled")
+end
 Dir["#{ROOT}/clusters/*/overrides/**/*.yaml"].each do |path|
   text = File.read(path)
   check(!text.match?(/\A---\s*\{\}\s*\z/), "#{path}: reject invalid document form --- {}")
@@ -263,7 +274,21 @@ check(render(HELM,'template','unprofiled',CHART).empty?, 'Cluster-apps chart wit
 check(render(HELM,'template','oci',CHART,*cluster_profile('oci')).empty?, 'Unconfigured OCI must render nothing')
 remote_flags = ['--set','cluster.enabled=true','--set','cluster.prepared=true','--set','cluster.server=https://oci-api.invalid:6443','--set','cluster.vaultAddress=https://vault.private.invalid:8200']
 remote_apps = render(HELM,'template','oci',CHART,*cluster_profile('oci'),*stage_flags,*remote_flags)
-check(remote_apps.length==8, 'Workload cluster must not deploy management storage, Crossplane, Vault or root PKI')
+oci_pin = %w[
+  oci-cert-manager oci-mesh-prerequisites oci-vault-issuer
+  oci-cert-manager-istio-csr oci-istio-base oci-istiod
+  oci-mesh-qualification oci-mesh-enrollment
+  oci-external-secrets oci-reloader
+]
+rendered_names = remote_apps.map { |a| a.dig('metadata', 'name') }.sort
+check(rendered_names == oci_pin.sort, 'Workload cluster renders the role-less certificate, mesh, and secrets apps')
+catalog = YAML.safe_load(File.read("#{ROOT}/charts/cluster-apps/values.yaml")).fetch('services')
+derived = catalog.select { |s| s['role'].nil? && Ceremony::PROMOTABLE.include?(s['stage']) }.map { |s| "oci-#{s['name']}" }.sort
+check(derived == oci_pin.sort, 'OCI pin drifted from role-less services in stage_flags')
+%w[external-secrets reloader].each do |name|
+  row = catalog.find { |s| s['name'] == name }
+  check(row && row['role'].nil? && row['stage'] == 'secrets', "#{name} stays a role-less secrets service")
+end
 remote_apps.each do |a|
   check(a.dig('metadata','name').start_with?('oci-') && a.dig('spec','project')=='oci', 'Remote Applications must be cluster-scoped')
   check(a.dig('spec','destination','server')=='https://oci-api.invalid:6443', 'Remote destination isolation')
@@ -305,6 +330,53 @@ check(authentik_runtime.any? { |o| o['kind']=='Service' && o.dig('spec','type')=
 check(sts.dig('metadata','name')=='vault' && sts.dig('spec','template','metadata','labels','app.kubernetes.io/name')=='vault','Wrapper must preserve Vault service and pod identities')
 check(rendered['cert-manager'].any? { |o| o['kind']=='ServiceAccount' && o.dig('metadata','name')=='cert-manager' }, 'Vault token RBAC must bind the real controller SA')
 check(csr.any? { |o| o['kind']=='Service' && o.dig('metadata','name')=='cert-manager-istio-csr' }, 'Istiod CA address must resolve to the rendered signer service')
+eso = rendered.fetch('external-secrets')
+check(eso.none? { |o| %w[SecretStore ClusterSecretStore ExternalSecret ClusterExternalSecret].include?(o['kind']) }, 'secrets stage installs operators only')
+check(eso.none? { |o| o.dig('metadata', 'namespace') == 'kube-system' }, 'external-secrets must not use kube-system')
+check(eso.any? { |o| o['kind'] == 'CustomResourceDefinition' && o.dig('spec', 'group') == 'external-secrets.io' }, 'external-secrets chart includes an external-secrets.io CRD')
+check(eso.none? { |o| o['kind'] == 'Certificate' }, 'external-secrets renders no Certificate')
+ctrl = eso.find { |o| o['kind'] == 'Deployment' && o.dig('metadata', 'name') == 'external-secrets' }
+ctrl_args = ctrl.dig('spec', 'template', 'spec', 'containers').find { |c| c['name'] == 'external-secrets' }.fetch('args')
+check(ctrl_args.include?('--enable-leader-election=true'), 'external-secrets elects a leader in its namespace')
+check(ctrl_args.none? { |arg| arg.include?('kube-system') }, 'leader election args must not name kube-system')
+lead = eso.find { |o| o['kind'] == 'Role' && o.dig('metadata', 'name') == 'external-secrets-leaderelection' }
+check(lead && lead.dig('metadata', 'namespace') == 'external-secrets', 'leader election Role stays in external-secrets')
+check(lead.fetch('rules').any? { |rule| (rule['resources'] || []).include?('leases') }, 'leader election Role grants leases')
+placeholder = eso.find { |o| o['kind'] == 'ConfigMap' && o.dig('metadata', 'name') == 'oke-vault-listener-ca' }
+check(placeholder && placeholder.dig('metadata', 'namespace') == 'external-secrets', 'listener CA placeholder is named and namespaced')
+body = placeholder.dig('data', 'ca.crt').to_s
+check(body == 'PLACEHOLDER_NOT_A_CERTIFICATE', 'placeholder is exactly PLACEHOLDER_NOT_A_CERTIFICATE')
+check(eso.none? { |o| o['kind'] == 'Deployment' && o.to_json.include?('oke-vault-listener-ca') }, 'do not mount the placeholder')
+webhook_secret = eso.find { |o| o['kind'] == 'Secret' && o.dig('metadata', 'name') == 'external-secrets-webhook' }
+check(webhook_secret && webhook_secret['data'].nil?, 'webhook secret data belongs to certController')
+%w[external-secrets external-secrets-webhook external-secrets-cert-controller].each do |deploy_name|
+  deploy = eso.find { |o| o['kind'] == 'Deployment' && o.dig('metadata', 'name') == deploy_name }
+  check(deploy && deploy.dig('spec', 'replicas') == 2, "#{deploy_name} replicaCount is 2")
+  container = deploy.dig('spec', 'template', 'spec', 'containers').first
+  resources = container.fetch('resources')
+  check(resources.dig('requests', 'cpu') == '50m' && resources.dig('requests', 'memory') == '128Mi', "#{deploy_name} requests")
+  check(resources.dig('limits', 'memory') == '384Mi' && !resources.fetch('limits').key?('cpu'), "#{deploy_name} memory limit and no cpu limit")
+  spreads = deploy.dig('spec', 'template', 'spec', 'topologySpreadConstraints')
+  selector = spreads && spreads[0] && spreads[0].dig('labelSelector', 'matchLabels')
+  pod_labels = deploy.dig('spec', 'template', 'metadata', 'labels')
+  check(spreads && spreads.length == 1 && selector && !selector.empty? && selector.all? { |key, value| pod_labels[key] == value }, "#{deploy_name} topology selector matches its pod labels")
+end
+reloader = rendered.fetch('reloader')
+check(reloader.none? { |o| o.dig('metadata', 'namespace') == 'kube-system' }, 'reloader must not use kube-system')
+check(reloader.none? { |o| o['kind'] == 'Certificate' }, 'reloader renders no Certificate')
+rel_dep = reloader.find { |o| o['kind'] == 'Deployment' }
+check(rel_dep && rel_dep.dig('metadata', 'name') == 'reloader' && rel_dep.dig('spec', 'replicas') == 2, 'reloader fullnameOverride and HA replicas')
+rel_container = rel_dep.dig('spec', 'template', 'spec', 'containers').find { |c| c['name'] == 'reloader' }
+rel_resources = rel_container.fetch('resources')
+check(rel_resources.dig('requests', 'cpu') == '50m' && rel_resources.dig('requests', 'memory') == '128Mi', 'reloader requests')
+check(rel_resources.dig('limits', 'memory') == '384Mi' && !rel_resources.fetch('limits').key?('cpu'), 'reloader memory limit and no cpu limit')
+gomax = rel_container.fetch('env').find { |e| e['name'] == 'GOMAXPROCS' }
+check(gomax && gomax['value'] == '0' && gomax['valueFrom'].nil?, 'reloader must not read a missing cpu limit')
+check(rel_container.fetch('args').include?('--enable-ha=true'), 'reloader leader election via enableHA')
+rel_spreads = rel_dep.dig('spec', 'template', 'spec', 'topologySpreadConstraints')
+rel_selector = rel_spreads && rel_spreads[0] && rel_spreads[0].dig('labelSelector', 'matchLabels')
+rel_labels = rel_dep.dig('spec', 'template', 'metadata', 'labels')
+check(rel_spreads && rel_spreads.length == 1 && rel_selector && !rel_selector.empty? && rel_selector.all? { |key, value| rel_labels[key] == value }, 'reloader topology selector matches its pod labels')
 puts 'Management and inactive/synthetic OCI Helm contracts: passed (no live registration or deployment)'
 _, _, invalid = Open3.capture3(HELM,'template','oci',CHART,*cluster_profile('oci'),'--set','cluster.enabled=true')
 check(!invalid.success?, 'Unprepared OCI activation must fail')
@@ -326,3 +398,10 @@ steps=job.fetch('steps')
 check(steps.select { |s| s['uses'] }.all? { |s| s['uses'].match?(/@[0-9a-f]{40}$/) && s.dig('with','persist-credentials')==false }, 'Pin actions and never persist write credentials')
 check(steps.last['run'].include?('ruby ops/check.rb') && steps.last['run'].include?('python3 ops/verify-mesh.py --self-test'), 'CI must run the same offline contracts as operators')
 puts 'Read-only GitOps PR validation workflow: passed'
+ceremony = YAML.safe_load(File.read("#{ROOT}/.github/workflows/ceremony-promote.yaml"))
+workflow_options = ceremony.dig('on', 'workflow_dispatch', 'inputs', 'stage', 'options')
+check(workflow_options == Ceremony::PROMOTE_PR, 'ceremony-promote options must match Ceremony::PROMOTE_PR')
+hints = File.read("#{ROOT}/Makefile").scan(/echo 'Set STAGE=<([^>]+)>'/).flatten
+check(hints == [Ceremony::PROMOTABLE.join('|'), Ceremony::PROMOTE_PR.join('|')], 'Makefile stage hints must match ops/stages.rb')
+validation = File.read("#{ROOT}/charts/cluster-apps/templates/validation.yaml")
+check(!validation.include?('secrets'), 'validation.yaml must not chain the secrets stage')

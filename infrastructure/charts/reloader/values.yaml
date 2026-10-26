@@ -1,0 +1,27 @@
+---
+reloader:
+  # Upstream fullname is <release>-<chart>. A release named reloader would render reloader-reloader.
+  fullnameOverride: reloader
+  reloader:
+    autoReloadAll: false
+    enableHA: true
+    deployment:
+      replicas: 2
+      # "0" keeps GOMAXPROCS off a fieldRef to limits.cpu, which this pod does not set.
+      gomaxprocsOverride: "0"
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 384Mi
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: reloader
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1

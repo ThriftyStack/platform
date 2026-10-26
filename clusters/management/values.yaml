@@ -8,6 +8,7 @@ stages:
   qualification: true
   enrollment: true
   authentik: true
+  secrets: true
 pkiClusters: []
 fleet:
   enabled: true
