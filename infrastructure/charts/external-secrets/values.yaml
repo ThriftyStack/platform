@@ -1,6 +1,5 @@
 ---
 external-secrets:
-  # Lease follows the pod namespace (controller-runtime v0.25). Do not set a kube-system namespace.
   leaderElect: true
   replicaCount: 2
   installCRDs: true

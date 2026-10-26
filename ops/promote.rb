@@ -45,8 +45,6 @@ when 'qualification'
 when 'enrollment'
   app('mesh-qualification')
   run('python3',"#{ROOT}/ops/verify-mesh.py",'--permissive','--require-renewal','--cluster',CLUSTER_ID,'--context',CONTEXT)
-when 'secrets'
-  # Operators only. No kubectl, and vault-bootstrap-ca is not required.
 end
 k['stages'][stage] = true; File.write(path,k.to_yaml)
 puts "Enabled #{stage} locally. Review the diff and publish separately; nothing applied or pushed."
