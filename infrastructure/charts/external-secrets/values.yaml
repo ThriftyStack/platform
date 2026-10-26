@@ -55,7 +55,5 @@ external-secrets:
         namespace: external-secrets
         labels:
           thriftystack.io/placeholder: vault-listener-ca
-        annotations:
-          thriftystack.io/source: out-of-band
       data:
         ca.crt: PLACEHOLDER_NOT_A_CERTIFICATE
