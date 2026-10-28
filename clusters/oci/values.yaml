@@ -6,3 +6,4 @@ stages:
   istio: false
   qualification: false
   enrollment: false
+  secrets: false

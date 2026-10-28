@@ -4,15 +4,19 @@ require 'yaml'
 require 'json'
 require 'open3'
 ROOT = File.expand_path('..', __dir__)
-STAGES = %w[vault pki certificates istio qualification enrollment authentik].freeze
+require_relative 'stages'
 require_relative 'cluster'
 def app(name)
   o = JSON.parse(run_argo('kubectl', '-n', 'argocd', 'get', 'application', application_name(name), '-o', 'json'))
   raise "#{name} must be Synced and Healthy" unless o.dig('status','sync','status') == 'Synced' && o.dig('status','health','status') == 'Healthy'
 end
-stage = ARGV.fetch(0); index = STAGES.index(stage); abort 'Unknown stage' unless index
+stage = ARGV.fetch(0)
+abort 'Unknown stage' unless Ceremony::PROMOTABLE.include?(stage)
 path = "#{ROOT}/clusters/#{CLUSTER_ID}/values.yaml"; k = YAML.safe_load(File.read(path))
-STAGES.take(index).reject { |s| CLUSTER['role']!='management' && %w[vault pki].include?(s) }.each { |s| raise "Promote #{s} first" unless k['stages'][s] }
+if Ceremony::MESH.include?(stage)
+  index = Ceremony::MESH.index(stage)
+  Ceremony::MESH.take(index).reject { |s| CLUSTER['role']!='management' && %w[vault pki].include?(s) }.each { |s| raise "Promote #{s} first" unless k['stages'][s] }
+end
 if CLUSTER['role']=='management'
   app('longhorn'); app('crossplane'); app('vault-provider')
 else

@@ -4,11 +4,11 @@ require 'yaml'
 require 'open3'
 require 'time'
 ROOT = File.expand_path('..', __dir__)
-STAGES = %w[vault pki certificates istio qualification enrollment].freeze
+require_relative 'stages'
 require_relative 'cluster'
 
 stage = ARGV.fetch(0)
-abort 'Unknown stage' unless STAGES.include?(stage)
+abort 'Unknown stage' unless Ceremony::PROMOTE_PR.include?(stage)
 path = "#{ROOT}/clusters/#{CLUSTER_ID}/values.yaml"
 relative = "clusters/#{CLUSTER_ID}/values.yaml"
 before = File.read(path)

@@ -29,6 +29,7 @@ stages:
   qualification: false
   enrollment: false
   authentik: false
+  secrets: false
 pkiClusters: []
 fleet:
   enabled: false
@@ -85,6 +86,29 @@ services:
     wave: "-10"
     path: infrastructure/configuration/vault-provider
     namespace: crossplane-system
+  - name: external-secrets
+    releaseName: external-secrets
+    stage: secrets
+    wave: "-4"
+    path: infrastructure/charts/external-secrets
+    namespace: external-secrets
+    # certController writes caBundle and the webhook Secret after sync.
+    ignoreDifferences:
+      - group: admissionregistration.k8s.io
+        kind: ValidatingWebhookConfiguration
+        jqPathExpressions:
+          - .webhooks[]?.clientConfig.caBundle
+      - group: ""
+        kind: Secret
+        name: external-secrets-webhook
+        jsonPointers:
+          - /data
+  - name: reloader
+    releaseName: reloader
+    stage: secrets
+    wave: "-3"
+    path: infrastructure/charts/reloader
+    namespace: reloader
   - name: vault
     releaseName: vault
     stage: vault

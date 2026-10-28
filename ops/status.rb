@@ -4,7 +4,7 @@ require 'yaml'
 require 'json'
 require 'open3'
 ROOT = File.expand_path('..', __dir__)
-STAGES = %w[vault pki certificates istio qualification enrollment authentik].freeze
+require_relative 'stages'
 require_relative 'cluster'
 
 def try_run(*args)
@@ -42,17 +42,18 @@ end
 
 values = YAML.safe_load(File.read("#{ROOT}/clusters/#{CLUSTER_ID}/values.yaml"))
 stages = values.fetch('stages')
-applicable = STAGES.reject { |s| CLUSTER['role'] != 'management' && %w[vault pki].include?(s) }
+applicable = Ceremony::MESH.reject { |s| CLUSTER['role'] != 'management' && %w[vault pki].include?(s) }
 
 puts "Cluster #{CLUSTER_ID} (#{CLUSTER['role']}) context=#{CONTEXT}"
 puts 'Stages:'
 applicable.each { |s| line(s, stages[s] ? 'enabled' : 'pending') }
+line('secrets', stages['secrets'] ? 'enabled' : 'pending')
 
 apps = case CLUSTER['role']
        when 'management'
-         %w[longhorn netbird crossplane vault-provider vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik controlplane-authentik]
+         %w[longhorn netbird crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik controlplane-authentik]
        else
-         %w[cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment]
+         %w[external-secrets reloader cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment]
        end
 puts 'Argo Applications:'
 apps.each do |name|
@@ -109,16 +110,20 @@ end
 evidence = "#{ROOT}/.evidence/#{CLUSTER_ID}/renewal.json"
 line('renewal evidence', File.exist?(evidence) ? evidence.sub("#{ROOT}/", '') : 'absent')
 
-next_stage = applicable.find { |s| !stages[s] }
+next_mesh = applicable.find { |s| !stages[s] }
+next_cluster = Ceremony::CLUSTER.find { |s| !stages[s] }
+next_stage = next_mesh || next_cluster
 blockers = []
 if next_stage.nil?
   puts 'Next: ceremony stages complete; revoke bootstrap root when break-glass recovery is ready (see bootstrap/VAULT-PKI.md).'
   exit 0
 end
 
-index = STAGES.index(next_stage)
-STAGES.take(index).reject { |s| CLUSTER['role'] != 'management' && %w[vault pki].include?(s) }.each do |s|
-  blockers << "enable #{s} first" unless stages[s]
+if Ceremony::MESH.include?(next_stage)
+  index = Ceremony::MESH.index(next_stage)
+  Ceremony::MESH.take(index).reject { |s| CLUSTER['role'] != 'management' && %w[vault pki].include?(s) }.each do |s|
+    blockers << "enable #{s} first" unless stages[s]
+  end
 end
 
 case next_stage
@@ -167,6 +172,7 @@ hint = case next_stage
        when 'istio' then 'Wait for cert-manager / vault-issuer / mesh-prerequisites Ready'
        when 'qualification' then 'Wait for istio-csr and istiod Certificate Ready'
        when 'enrollment' then 'make verify-mesh-renewal, then promote-pr STAGE=enrollment'
+       when 'secrets' then 'Set stages.secrets. Do not add a SecretStore or ClusterSecretStore in the promotion.'
        else 'See bootstrap/VAULT-PKI.md'
        end
 puts "Hint: #{hint}"
