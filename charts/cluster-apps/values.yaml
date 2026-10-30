@@ -30,6 +30,7 @@ stages:
   enrollment: false
   authentik: false
   secrets: false
+  bgp: false
 pkiClusters: []
 fleet:
   enabled: false
@@ -218,5 +219,15 @@ services:
     repoURL: https://github.com/ThriftyStack/controlplane.git
     targetRevision: main
     directory: true
+    syncOptions:
+      - SkipDryRunOnMissingResource=true
+  # BGP CRDs exist only after bootstrap enables bgpControlPlane.
+  - name: cilium-bgp
+    releaseName: cilium-bgp
+    stage: bgp
+    role: management
+    wave: "90"
+    path: infrastructure/configuration/cilium-bgp
+    namespace: cilium-bgp
     syncOptions:
       - SkipDryRunOnMissingResource=true

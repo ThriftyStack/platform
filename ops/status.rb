@@ -47,11 +47,11 @@ applicable = Ceremony::MESH.reject { |s| CLUSTER['role'] != 'management' && %w[v
 puts "Cluster #{CLUSTER_ID} (#{CLUSTER['role']}) context=#{CONTEXT}"
 puts 'Stages:'
 applicable.each { |s| line(s, stages[s] ? 'enabled' : 'pending') }
-line('secrets', stages['secrets'] ? 'enabled' : 'pending')
+Ceremony::CLUSTER.each { |s| line(s, stages[s] ? 'enabled' : 'pending') }
 
 apps = case CLUSTER['role']
        when 'management'
-         %w[longhorn netbird crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik controlplane-authentik]
+         %w[longhorn netbird crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik controlplane-authentik cilium-bgp]
        else
          %w[external-secrets reloader cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment]
        end
@@ -173,6 +173,7 @@ hint = case next_stage
        when 'qualification' then 'Wait for istio-csr and istiod Certificate Ready'
        when 'enrollment' then 'make verify-mesh-renewal, then promote-pr STAGE=enrollment'
        when 'secrets' then 'Set stages.secrets. Do not add a SecretStore or ClusterSecretStore in the promotion.'
+       when 'bgp' then 'Set stages.bgp after bootstrap enables bgpControlPlane. Do not add a LoadBalancer Service in that promotion.'
        else 'See bootstrap/VAULT-PKI.md'
        end
 puts "Hint: #{hint}"

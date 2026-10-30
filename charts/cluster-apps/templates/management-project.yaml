@@ -48,4 +48,8 @@ spec:
     - {group: pki.vault.upbound.io, kind: SecretBackendRole}
     - {group: opentofu.upbound.io, kind: ProviderConfig}
     - {group: opentofu.upbound.io, kind: Workspace}
+    - {group: cilium.io, kind: CiliumLoadBalancerIPPool}
+    - {group: cilium.io, kind: CiliumBGPAdvertisement}
+    - {group: cilium.io, kind: CiliumBGPPeerConfig}
+    - {group: cilium.io, kind: CiliumBGPClusterConfig}
 {{- end }}

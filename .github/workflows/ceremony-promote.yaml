@@ -20,6 +20,7 @@ name: Ceremony promote PR
           - qualification
           - enrollment
           - secrets
+          - bgp
       kube_context:
         description: Explicit kubectl context (required when cluster.context is empty)
         required: true
