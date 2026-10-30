@@ -9,6 +9,7 @@ stages:
   enrollment: true
   authentik: true
   secrets: true
+  bgp: true
 pkiClusters: []
 fleet:
   enabled: true

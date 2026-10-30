@@ -64,7 +64,7 @@ stage_flags = Ceremony::PROMOTABLE.flat_map { |s| ['--set', "stages.#{s}=true"] 
 management_docs = render(HELM, 'template', 'management', CHART, *cluster_profile('management'), *stage_flags)
 apps = management_docs.select { |o| o['kind']=='Application' }
 by_name = apps.to_h { |a| [a['metadata']['name'], a] }
-order = %w[longhorn netbird crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik controlplane-authentik]
+order = %w[longhorn netbird crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik controlplane-authentik cilium-bgp]
 waves = order.map { |name| by_name.fetch(name).dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave').to_i }
 check(waves.each_cons(2).all? { |a,b| a < b }, 'Dependency waves must follow deployment order')
 authentik = by_name.fetch('controlplane-authentik')
@@ -80,6 +80,12 @@ check(authentik.dig('spec','syncPolicy','automated') == {'prune' => false, 'self
 check(authentik.dig('spec','syncPolicy','syncOptions').include?('ServerSideApply=true'), 'Authentik root uses server-side apply')
 check(authentik.dig('spec','syncPolicy','syncOptions').include?('SkipDryRunOnMissingResource=true'), 'Authentik root must apply the OpenTofu provider before its CRDs exist')
 check(authentik.dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i > by_name.fetch('crossplane').dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i, 'Authentik root syncs after Crossplane')
+cilium_bgp = by_name.fetch('cilium-bgp')
+check(cilium_bgp.dig('spec','syncPolicy','syncOptions').include?('SkipDryRunOnMissingResource=true'), 'cilium-bgp must apply when BGP CRDs are not installed yet')
+check(cilium_bgp.dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i > authentik.dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i, 'cilium-bgp syncs after every earlier platform wave')
+check(cilium_bgp.dig('spec','syncPolicy','automated') == {'prune' => false, 'selfHeal' => true}, 'cilium-bgp self-heals and does not prune')
+check(cilium_bgp.dig('metadata','annotations','argocd.argoproj.io/sync-options') == 'Prune=false,Delete=false', 'cilium-bgp keeps prune and delete off')
+check(cilium_bgp.dig('spec','destination','namespace') == 'cilium-bgp', 'cilium-bgp destination namespace')
 project = management_docs.find { |o| o['kind']=='AppProject' && o.dig('metadata','name')=='management' }
 check(project, 'Management AppProject must be rendered')
 check(project.dig('spec','sourceRepos') == ['https://github.com/ThriftyStack/platform.git', 'https://github.com/ThriftyStack/controlplane.git'], 'Management project sources platform and controlplane')
@@ -198,7 +204,11 @@ cluster_groups = {
   'ValidatingAdmissionPolicyBinding' => 'admissionregistration.k8s.io',
   'PriorityClass' => 'scheduling.k8s.io',
   'Provider' => 'pkg.crossplane.io',
-  'DeploymentRuntimeConfig' => 'pkg.crossplane.io'
+  'DeploymentRuntimeConfig' => 'pkg.crossplane.io',
+  'CiliumLoadBalancerIPPool' => 'cilium.io',
+  'CiliumBGPAdvertisement' => 'cilium.io',
+  'CiliumBGPPeerConfig' => 'cilium.io',
+  'CiliumBGPClusterConfig' => 'cilium.io'
 }
 rendered.each_value do |objects|
   objects.each do |object|
@@ -377,6 +387,42 @@ rel_spreads = rel_dep.dig('spec', 'template', 'spec', 'topologySpreadConstraints
 rel_selector = rel_spreads && rel_spreads[0] && rel_spreads[0].dig('labelSelector', 'matchLabels')
 rel_labels = rel_dep.dig('spec', 'template', 'metadata', 'labels')
 check(rel_spreads && rel_spreads.length == 1 && rel_selector && !rel_selector.empty? && rel_selector.all? { |key, value| rel_labels[key] == value }, 'reloader topology selector matches its pod labels')
+bgp = rendered.fetch('cilium-bgp')
+check(bgp.none? { |o| o['kind'] == 'Service' && o.dig('spec', 'type') == 'LoadBalancer' }, 'cilium-bgp renders no LoadBalancer Service')
+check(bgp.none? { |o| o.dig('metadata', 'namespace') == 'kube-system' }, 'cilium-bgp must not use kube-system')
+pool = bgp.find { |o| o['kind'] == 'CiliumLoadBalancerIPPool' }
+check(pool && pool.dig('metadata', 'name') == 'mgmt-internal', 'LB pool name')
+check(pool.dig('spec', 'blocks') == [{'cidr' => '10.0.50.0/28'}], 'pool CIDR is 10.0.50.0/28')
+check(pool.dig('spec', 'allowFirstLastIPs') == 'No', 'LB pool reserves the first and last addresses')
+check(pool.dig('spec', 'serviceSelector', 'matchLabels') == {'thriftystack.io/lb-pool' => 'mgmt-internal'}, 'LB pool selects thriftystack.io/lb-pool=mgmt-internal')
+advertisement = bgp.find { |o| o['kind'] == 'CiliumBGPAdvertisement' }
+check(advertisement && advertisement.dig('metadata', 'name') == 'mgmt-lb', 'BGP advertisement name')
+check(advertisement.dig('metadata', 'labels', 'advertise') == 'bgp', 'BGP advertisement carries advertise=bgp')
+ads = advertisement.dig('spec', 'advertisements')
+check(ads && ads.length == 1 && ads[0]['advertisementType'] == 'Service', 'BGP advertises Services only')
+check(ads[0].dig('service', 'addresses') == ['LoadBalancerIP'], 'only LoadBalancerIP advertised')
+check(ads[0].dig('selector', 'matchLabels') == {'thriftystack.io/lb-pool' => 'mgmt-internal'}, 'BGP advertisement selects the management LB pool label')
+check(bgp.none? { |o| o.to_json.include?('PodCIDR') }, 'do not advertise PodCIDR')
+peer = bgp.find { |o| o['kind'] == 'CiliumBGPPeerConfig' }
+check(peer && peer.dig('metadata', 'name') == 'unifi-gateway', 'UniFi peer config name')
+check(peer.dig('spec', 'families') == [{'afi' => 'ipv4', 'safi' => 'unicast', 'advertisements' => {'matchLabels' => {'advertise' => 'bgp'}}}], 'UniFi peer selects ipv4 unicast advertise=bgp')
+check(peer.dig('spec', 'gracefulRestart') == {'enabled' => true, 'restartTimeSeconds' => 15}, 'UniFi peer graceful restart is 15s')
+check(peer.dig('spec', 'timers', 'holdTimeSeconds') == 9 && peer.dig('spec', 'timers', 'keepAliveTimeSeconds') == 3, 'UniFi peer timers are hold 9 keepalive 3')
+cluster_bgp = bgp.find { |o| o['kind'] == 'CiliumBGPClusterConfig' }
+check(cluster_bgp && cluster_bgp.dig('metadata', 'name') == 'mgmt', 'BGP cluster config name')
+check(cluster_bgp.dig('spec', 'nodeSelector', 'matchLabels') == {'kubernetes.io/os' => 'linux'}, 'BGP runs on Linux nodes')
+instances = cluster_bgp.dig('spec', 'bgpInstances')
+check(instances && instances.length == 1 && instances[0]['name'] == 'mgmt' && instances[0]['localASN'] == 65030, 'local ASN is 65030')
+check(advertisement.dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave') == '0', 'advertisements sync before the cluster config')
+check(peer.dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave') == '0', 'peer config syncs before the cluster config')
+check(cluster_bgp.dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave') == '1', 'cluster config syncs after the peer it references')
+check(!instances[0].key?('localPort'), 'BGP instance sets no localPort')
+check(instances[0]['peers'] == [{'name' => 'unifi', 'peerASN' => 65020, 'peerAddress' => '10.0.10.254', 'peerConfigRef' => {'name' => 'unifi-gateway'}}], 'UniFi peer ASN is 65020')
+%w[CiliumLoadBalancerIPPool CiliumBGPAdvertisement CiliumBGPPeerConfig CiliumBGPClusterConfig].each do |kind|
+  check(allow.include?(['cilium.io', kind]), "Management project must allow cilium.io/#{kind}")
+end
+bgp_row = catalog.find { |s| s['name'] == 'cilium-bgp' }
+check(bgp_row && bgp_row['role'] == 'management' && bgp_row['stage'] == 'bgp', 'cilium-bgp stays a management bgp service')
 puts 'Management and inactive/synthetic OCI Helm contracts: passed (no live registration or deployment)'
 _, _, invalid = Open3.capture3(HELM,'template','oci',CHART,*cluster_profile('oci'),'--set','cluster.enabled=true')
 check(!invalid.success?, 'Unprepared OCI activation must fail')
@@ -405,3 +451,4 @@ hints = File.read("#{ROOT}/Makefile").scan(/echo 'Set STAGE=<([^>]+)>'/).flatten
 check(hints == [Ceremony::PROMOTABLE.join('|'), Ceremony::PROMOTE_PR.join('|')], 'Makefile stage hints must match ops/stages.rb')
 validation = File.read("#{ROOT}/charts/cluster-apps/templates/validation.yaml")
 check(!validation.include?('secrets'), 'validation.yaml must not chain the secrets stage')
+check(!validation.include?('bgp'), 'validation.yaml must not chain the bgp stage')
