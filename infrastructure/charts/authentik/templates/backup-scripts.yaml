@@ -1,0 +1,147 @@
+{{- if .Values.backup.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-backup-scripts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: authentik-backup
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  dump.sh: |
+    #!/bin/bash
+    # Logical dump plus a tar of /data. Plaintext stays on the pod emptyDir.
+    set -euo pipefail
+    umask 077
+    recipient=$(printf '%s' "${AGE_RECIPIENT}" | tr -d '[:space:]')
+    if [ -z "${recipient}" ] || [ "${recipient}" = "age1REPLACE_ME" ]; then
+      echo "authentik backup: age recipient is still the placeholder age1REPLACE_ME; set backup.ageRecipient to the offline public key" >&2
+      exit 1
+    fi
+    case "${recipient}" in
+      age1*) ;;
+      *)
+        echo "authentik backup: age recipient must be an age1 public key" >&2
+        exit 1
+        ;;
+    esac
+    stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    printf '%s\n' "${stamp}" > /work/stamp
+    mkdir -p /work/plain
+    pg_dump -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}" -Fc --file /work/plain/authentik.dump
+    set +e
+    tar --warning=no-file-changed -C /data -czf /work/plain/data.tar.gz .
+    status=$?
+    set -e
+    if [ "${status}" -gt 1 ]; then
+      echo "authentik backup: tar of /data failed with status ${status}" >&2
+      exit "${status}"
+    fi
+    cat > /work/plain/manifest.env <<EOF
+    authentik_version=${AUTHENTIK_VERSION}
+    postgresql_major=${POSTGRESQL_MAJOR}
+    created_at=${stamp}
+    media_path=/data
+    prefix=${BACKUP_PREFIX}/${stamp}
+    EOF
+  upload.sh: |
+    #!/bin/bash
+    # Upload encrypted objects, then COMPLETE. Never deletes bucket objects.
+    set -euo pipefail
+    umask 077
+    recipient=$(printf '%s' "${AGE_RECIPIENT}" | tr -d '[:space:]')
+    if [ -z "${recipient}" ] || [ "${recipient}" = "age1REPLACE_ME" ]; then
+      echo "authentik backup: age recipient is still the placeholder age1REPLACE_ME; set backup.ageRecipient to the offline public key" >&2
+      exit 1
+    fi
+    stamp=$(cat /work/stamp)
+    for file in authentik.dump data.tar.gz manifest.env; do
+      test -s "/work/plain/${file}.age"
+      rm -f "/work/plain/${file}"
+      if [ -e "/work/plain/${file}" ]; then
+        echo "authentik backup: plaintext ${file} is still on disk" >&2
+        exit 1
+      fi
+    done
+    (
+      cd /work/plain
+      sha256sum authentik.dump.age data.tar.gz.age manifest.env.age > SHA256SUMS
+    )
+    config=$(mktemp)
+    cat > "${config}" <<'EOF'
+    [default]
+    s3 =
+        addressing_style = path
+    EOF
+    export AWS_CONFIG_FILE="${config}"
+    dest="s3://${BUCKET}/${PREFIX}/${stamp}"
+    for object in authentik.dump.age data.tar.gz.age manifest.env.age SHA256SUMS; do
+      aws --endpoint-url "${ENDPOINT}" s3 cp "/work/plain/${object}" "${dest}/${object}" --only-show-errors
+    done
+    printf '%s\n' "${stamp}" > /work/COMPLETE
+    aws --endpoint-url "${ENDPOINT}" s3 cp /work/COMPLETE "${dest}/COMPLETE" --only-show-errors
+  fetch.sh: |
+    #!/bin/bash
+    # Download the newest complete prefix. Retention deletes stay on the bucket.
+    set -euo pipefail
+    umask 077
+    config=$(mktemp)
+    cat > "${config}" <<'EOF'
+    [default]
+    s3 =
+        addressing_style = path
+    EOF
+    export AWS_CONFIG_FILE="${config}"
+    key=$(aws --endpoint-url "${ENDPOINT}" s3 ls "s3://${BUCKET}/${PREFIX}/" --recursive | awk '/COMPLETE$/ { print $4 }' | sort | tail -n 1)
+    if [ -z "${key}" ]; then
+      echo "authentik restore-test: no COMPLETE object under s3://${BUCKET}/${PREFIX}/" >&2
+      exit 1
+    fi
+    prefix_dir=${key%/COMPLETE}
+    echo "authentik restore-test: using ${prefix_dir}"
+    mkdir -p /work/enc /work/plain
+    aws --endpoint-url "${ENDPOINT}" s3 cp "s3://${BUCKET}/${prefix_dir}" /work/enc/ --recursive --only-show-errors
+    test -f /work/enc/COMPLETE
+    test -s /work/enc/SHA256SUMS
+    test -s /work/enc/authentik.dump.age
+    (
+      cd /work/enc
+      sha256sum -c SHA256SUMS
+    )
+  restore.sh: |
+    #!/bin/bash
+    # Restore the dump into the throwaway Postgres in this pod and count rows.
+    set -euo pipefail
+    for i in $(seq 1 60); do
+      if pg_isready -h 127.0.0.1 -U authentik -d authentik; then
+        break
+      fi
+      if [ "${i}" -eq 60 ]; then
+        echo "authentik restore-test: throwaway Postgres did not become ready" >&2
+        exit 1
+      fi
+      sleep 2
+    done
+    test -s /work/plain/authentik.dump
+    pg_restore -h 127.0.0.1 -U authentik -d authentik --no-owner --exit-on-error /work/plain/authentik.dump
+    users=$(psql -h 127.0.0.1 -U authentik -d authentik -Atc 'SELECT count(*) FROM authentik_core_user')
+    migrations=$(psql -h 127.0.0.1 -U authentik -d authentik -Atc 'SELECT count(*) FROM django_migrations')
+    echo "authentik_core_user count: ${users}"
+    echo "django_migrations count: ${migrations}"
+    case "${users}" in
+      ''|*[!0-9]*)
+        echo "authentik restore-test: authentik_core_user count was not a number" >&2
+        exit 1
+        ;;
+    esac
+    case "${migrations}" in
+      ''|*[!0-9]*)
+        echo "authentik restore-test: django_migrations count was not a number" >&2
+        exit 1
+        ;;
+    esac
+    if [ "${migrations}" -lt 1 ]; then
+      echo "authentik restore-test: django_migrations is empty" >&2
+      exit 1
+    fi
+{{- end }}

@@ -336,6 +336,51 @@ check(authentik_app.dig('spec','destination','namespace')=='authentik', 'Authent
 check(authentik_app.dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i < by_name.fetch('crossplane-authentik').dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i, 'Authentik runtime must sync before identity Workspace')
 authentik_runtime = rendered.fetch('authentik')
 check(authentik_runtime.any? { |o| o['kind']=='Service' && o.dig('spec','type')=='NodePort' && (o.dig('spec','ports')||[]).any? { |p| p['nodePort']==30080 } }, 'Authentik server exposes HTTP NodePort 30080 for the Cloudflare tunnel')
+authentik_values = YAML.safe_load(File.read("#{ROOT}/infrastructure/charts/authentik/values.yaml"))
+media = authentik_runtime.find { |o| o['kind']=='PersistentVolumeClaim' && o.dig('metadata','name')==authentik_values.dig('media','claimName') }
+check(media && media.dig('spec','storageClassName')=='longhorn' && media.dig('spec','accessModes')==['ReadWriteOnce'] && media.dig('spec','resources','requests','storage')=='10Gi', 'Authentik media PVC is Longhorn RWO 10Gi')
+def authentik_mounts_data?(object)
+  containers = object.dig('spec','template','spec','containers') || []
+  containers.any? { |container| (container['volumeMounts'] || []).any? { |mount| mount['name']=='data' && mount['mountPath']=='/data' } }
+end
+authentik_server = authentik_runtime.find { |o| o['kind']=='Deployment' && o.dig('metadata','name')=='authentik-server' }
+authentik_worker = authentik_runtime.find { |o| o['kind']=='Deployment' && o.dig('metadata','name')=='authentik-worker' }
+check(authentik_mounts_data?(authentik_server) && authentik_mounts_data?(authentik_worker), 'Authentik server and worker mount the media PVC at /data')
+server_claim = (authentik_server.dig('spec','template','spec','volumes') || []).find { |volume| volume['name']=='data' }
+worker_claim = (authentik_worker.dig('spec','template','spec','volumes') || []).find { |volume| volume['name']=='data' }
+check(server_claim&.dig('persistentVolumeClaim','claimName')==authentik_values.dig('media','claimName') && worker_claim&.dig('persistentVolumeClaim','claimName')==authentik_values.dig('media','claimName'), 'Authentik server and worker mount the wrapper media PVC')
+check(authentik_server.dig('spec','strategy','type')=='Recreate' && authentik_worker.dig('spec','strategy','type')=='Recreate', 'Authentik media rollout uses Recreate so the RWO volume is released')
+check(authentik_server.dig('spec','template','spec','securityContext','fsGroup')==1000 && authentik_worker.dig('spec','template','spec','securityContext','fsGroup')==1000, 'Authentik media volume is writable by uid 1000')
+worker_affinity = authentik_worker.dig('spec','template','spec','affinity','podAffinity','requiredDuringSchedulingIgnoredDuringExecution') || []
+check(worker_affinity.any? { |term| term['topologyKey']=='kubernetes.io/hostname' && term.dig('labelSelector','matchLabels','app.kubernetes.io/component')=='server' }, 'Authentik worker shares the server node so both can mount RWO media')
+backup_job = authentik_runtime.find { |o| o['kind']=='CronJob' && o.dig('metadata','name')=='authentik-backup' }
+check(backup_job && backup_job.dig('spec','schedule')=='15 3 * * *' && backup_job.dig('spec','suspend')!=true && backup_job.dig('spec','concurrencyPolicy')=='Forbid', 'Authentik backup CronJob is a nightly exclusive run')
+backup_pod = backup_job.dig('spec','jobTemplate','spec','template','spec')
+backup_affinity = backup_pod.dig('affinity','podAffinity','requiredDuringSchedulingIgnoredDuringExecution') || []
+check(backup_affinity.any? { |term| term['topologyKey']=='kubernetes.io/hostname' && term.dig('labelSelector','matchLabels','app.kubernetes.io/component')=='server' }, 'Authentik backup pod is pinned to the server node for the RWO media volume')
+backup_media = (backup_pod['volumes'] || []).find { |volume| volume['name']=='media' }
+check(backup_media && backup_media.dig('persistentVolumeClaim','claimName')==authentik_values.dig('media','claimName') && backup_media.dig('persistentVolumeClaim','readOnly')==true, 'Authentik backup mounts the media PVC read-only')
+dump = (backup_pod['initContainers'] || []).find { |container| container['name']=='dump' }
+dump_media = dump && (dump['volumeMounts'] || []).find { |mount| mount['mountPath']=='/data' }
+check(dump && dump['image']==authentik_values.dig('backup','images','postgres') && dump_media && dump_media['readOnly']==true, 'Authentik backup dumps with the bundled Postgres image and a read-only media mount')
+recipient_env = dump && (dump['env'] || []).find { |env| env['name']=='AGE_RECIPIENT' }
+check(recipient_env && recipient_env['value']==authentik_values.dig('backup','ageRecipient'), 'Authentik backup age recipient comes from values')
+scripts = authentik_runtime.find { |o| o['kind']=='ConfigMap' && o.dig('metadata','name')=='authentik-backup-scripts' }
+check(scripts, 'Authentik backup scripts ConfigMap is rendered')
+dump_script = scripts.dig('data','dump.sh').to_s
+check(dump_script.include?('age recipient is still the placeholder age1REPLACE_ME') && dump_script.index('age1REPLACE_ME') < dump_script.index('pg_dump'), 'Authentik backup rejects the placeholder age recipient before pg_dump')
+check(dump_script.include?('pg_dump') && dump_script.include?('-Fc'), 'Authentik backup uses pg_dump custom format')
+upload_script = scripts.dig('data','upload.sh').to_s
+check(upload_script.include?('COMPLETE') && !upload_script.match?(/s3\s+rm|s3api\s+delete|s3\s+rb|mc\s+rm/), 'Authentik backup uploads COMPLETE and does not delete bucket objects')
+check(authentik_runtime.none? { |o| o['kind']=='Secret' && o.dig('metadata','name')==authentik_values.dig('backup','minio','secretName') }, 'Authentik MinIO credentials are not rendered as a Secret')
+external_secret = authentik_runtime.find { |o| o['kind']=='ExternalSecret' && o.dig('metadata','name')==authentik_values.dig('backup','minio','secretName') }
+check(external_secret && external_secret.dig('spec','secretStoreRef','name')==authentik_values.dig('backup','minio','secretStore') && external_secret.dig('spec','secretStoreRef','kind')=='ClusterSecretStore', 'Authentik backup MinIO ExternalSecret uses the estate ClusterSecretStore')
+check((external_secret.dig('spec','data') || []).all? { |row| row.dig('remoteRef','key')=='infra/authentik/backup-minio' }, 'Authentik backup MinIO path is infra/authentik/backup-minio')
+check(!authentik_runtime.to_json.include?('AGE-SECRET-KEY'), 'Authentik render contains no age identity')
+restore_job = authentik_runtime.find { |o| o['kind']=='CronJob' && o.dig('metadata','name')=='authentik-backup-restore-test' }
+check(restore_job && restore_job.dig('spec','suspend')==true, 'Authentik restore-test CronJob is suspended')
+restore_script = scripts.dig('data','restore.sh').to_s
+check(restore_script.include?('pg_restore') && restore_script.include?('authentik_core_user'), 'Authentik restore-test restores into throwaway Postgres and counts authentik_core_user')
 # Namespace admission, CSR address and storage policy selectors must still match actual dependency names.
 check(sts.dig('metadata','name')=='vault' && sts.dig('spec','template','metadata','labels','app.kubernetes.io/name')=='vault','Wrapper must preserve Vault service and pod identities')
 check(rendered['cert-manager'].any? { |o| o['kind']=='ServiceAccount' && o.dig('metadata','name')=='cert-manager' }, 'Vault token RBAC must bind the real controller SA')
