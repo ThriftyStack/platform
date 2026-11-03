@@ -4,7 +4,62 @@
 # Keys (envFrom): AUTHENTIK_SECRET_KEY, AUTHENTIK_POSTGRESQL__HOST,
 # AUTHENTIK_POSTGRESQL__USER, AUTHENTIK_POSTGRESQL__NAME, AUTHENTIK_POSTGRESQL__PASSWORD.
 # Also include postgresql-password for the Bitnami/Postgres subchart auth.existingSecret.
+# File storage for icons and uploads. Authentik 2025.12+ reads this at /data
+# (files live under /data/media). The claim name matches the volume below.
+media:
+  claimName: authentik-data
+  size: 10Gi
+  storageClass: longhorn
+
+# Nightly logical backup. Enabled for the management release. The job exits
+# before pg_dump while ageRecipient is still the placeholder.
+backup:
+  enabled: true
+  schedule: "15 3 * * *"
+  ageRecipient: age1REPLACE_ME
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  postgres:
+    secretName: authentik-credentials
+    hostKey: AUTHENTIK_POSTGRESQL__HOST
+    userKey: AUTHENTIK_POSTGRESQL__USER
+    databaseKey: AUTHENTIK_POSTGRESQL__NAME
+    passwordKey: AUTHENTIK_POSTGRESQL__PASSWORD
+  minio:
+    endpoint: https://s3.adminio.biz:9000
+    region: eu-poznan-1
+    bucket: authentik-backups
+    prefix: mgmt
+    secretStore: oke-vault
+    secretStoreKind: ClusterSecretStore
+    vaultPath: infra/authentik/backup-minio
+    accessKeyProperty: accessKey
+    secretKeyProperty: secretKey
+    secretName: authentik-backup-minio
+  images:
+    # Matches the bundled Postgres image tag in the Authentik chart.
+    postgres: docker.io/library/postgres:17.10-bookworm
+    # Upstream age publishes no image. This tag is the age v1.3.2 CLI.
+    age: docker.io/jauderho/age:v1.3.2
+    # aws cli, path-style. The minio/mc Docker Hub repository is gone.
+    awsCli: docker.io/amazon/aws-cli:2.39.3
+  restoreTest:
+    enabled: true
+    # Suspended. The schedule does not fire; an operator creates a Job from it.
+    schedule: "30 4 1 * *"
+    suspend: true
+    ageIdentitySecret: authentik-backup-age-identity
+    ageIdentityKey: identity
+
 authentik:
+  global:
+    volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: authentik-data
+    volumeMounts:
+      - name: data
+        mountPath: /data
   authentik:
     enabled: true
     log_level: info
@@ -21,6 +76,12 @@ authentik:
       port: 5432
   server:
     replicas: 1
+    # One RWO mount. Recreate releases the volume before the next pod starts.
+    deploymentStrategy:
+      type: Recreate
+    securityContext:
+      fsGroup: 1000
+      fsGroupChangePolicy: OnRootMismatch
     service:
       type: NodePort
       nodePortHttp: 30080
@@ -35,6 +96,23 @@ authentik:
         memory: 1Gi
   worker:
     replicas: 1
+    deploymentStrategy:
+      type: Recreate
+    securityContext:
+      fsGroup: 1000
+      fsGroupChangePolicy: OnRootMismatch
+    # Required so the worker shares the server node. Longhorn RWO attaches once.
+    # Release name is authentik (charts/cluster-apps). Replacing affinity drops
+    # the chart's soft anti-affinity preset, which would prefer another node.
+    affinity:
+      podAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: authentik
+                app.kubernetes.io/instance: authentik
+                app.kubernetes.io/component: server
+            topologyKey: kubernetes.io/hostname
     resources:
       requests:
         cpu: 100m
