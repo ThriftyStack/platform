@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # Offline contracts and exact artifact rendering; no cluster calls.
-# The Authentik allowlist also reads public controlplane main and the
+# The Authentik allowlist also reads public crossplane main and the
 # provider-opentofu CRDs for the package version that root pins.
 require 'yaml'
 require 'json'
@@ -64,12 +64,12 @@ stage_flags = Ceremony::PROMOTABLE.flat_map { |s| ['--set', "stages.#{s}=true"] 
 management_docs = render(HELM, 'template', 'management', CHART, *cluster_profile('management'), *stage_flags)
 apps = management_docs.select { |o| o['kind']=='Application' }
 by_name = apps.to_h { |a| [a['metadata']['name'], a] }
-order = %w[longhorn netbird crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik controlplane-authentik cilium-bgp]
+order = %w[longhorn netbird crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik crossplane-authentik cilium-bgp]
 waves = order.map { |name| by_name.fetch(name).dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave').to_i }
 check(waves.each_cons(2).all? { |a,b| a < b }, 'Dependency waves must follow deployment order')
-authentik = by_name.fetch('controlplane-authentik')
+authentik = by_name.fetch('crossplane-authentik')
 authentik_source = authentik.dig('spec','source')
-check(authentik_source['repoURL'] == 'https://github.com/ThriftyStack/controlplane.git', 'Authentik root must track the controlplane repository')
+check(authentik_source['repoURL'] == 'https://github.com/ThriftyStack/crossplane.git', 'Authentik root must track the crossplane repository')
 check(authentik_source['targetRevision'] == 'main', 'Authentik root tracks main')
 check(authentik_source['path'] == 'deploy/authentik', 'Authentik root path')
 check(authentik_source['directory'] == {'recurse' => false}, 'Authentik root must not recurse')
@@ -88,7 +88,7 @@ check(cilium_bgp.dig('metadata','annotations','argocd.argoproj.io/sync-options')
 check(cilium_bgp.dig('spec','destination','namespace') == 'cilium-bgp', 'cilium-bgp destination namespace')
 project = management_docs.find { |o| o['kind']=='AppProject' && o.dig('metadata','name')=='management' }
 check(project, 'Management AppProject must be rendered')
-check(project.dig('spec','sourceRepos') == ['https://github.com/ThriftyStack/platform.git', 'https://github.com/ThriftyStack/controlplane.git'], 'Management project sources platform and controlplane')
+check(project.dig('spec','sourceRepos') == ['https://github.com/ThriftyStack/platform.git', 'https://github.com/ThriftyStack/crossplane.git'], 'Management project sources platform and crossplane')
 check(project.dig('spec','clusterResourceWhitelist').none? { |r| r.values.include?('*') }, 'No wildcard management cluster privileges')
 check(project.dig('spec','destinations').none? { |d| d['namespace'] == 'kube-system' }, 'Management project must not permit kube-system')
 check(project.dig('spec','destinations').any? { |d| d == {'server' => 'https://kubernetes.default.svc', 'namespace' => 'crossplane-system'} }, 'Management project permits crossplane-system')
@@ -117,7 +117,7 @@ def fetch(url)
   raise "GET #{url} failed: #{response.code}" unless response.is_a?(Net::HTTPSuccess)
   response.body
 end
-authentik_docs = JSON.parse(fetch('https://api.github.com/repos/ThriftyStack/controlplane/contents/deploy/authentik?ref=main')).select { |entry| entry['name'].end_with?('.yaml') }.flat_map do |entry|
+authentik_docs = JSON.parse(fetch('https://api.github.com/repos/ThriftyStack/crossplane/contents/deploy/authentik?ref=main')).select { |entry| entry['name'].end_with?('.yaml') }.flat_map do |entry|
   documents(fetch(entry['download_url']))
 end
 authentik_docs.select! { |object| object.is_a?(Hash) && object['apiVersion'] && object['kind'] }
@@ -137,7 +137,7 @@ authentik_docs.each do |object|
   group = object['apiVersion'].include?('/') ? object['apiVersion'].split('/')[0] : ''
   kind = object['kind']
   scope = pkg_scope[[group, kind]] || opentofu_scope[[group, kind]]
-  check(scope, "No scope for controlplane #{group}/#{kind} at provider-opentofu #{provider_version}")
+  check(scope, "No scope for crossplane #{group}/#{kind} at provider-opentofu #{provider_version}")
   check(allow.include?([group, kind]), "Management project must allow #{group}/#{kind}") if scope == 'Cluster'
 end
 def ignores?(app, group, kind)
@@ -172,7 +172,7 @@ apps.each do |app|
   check(app.dig('spec','syncPolicy','automated','prune') == false, 'No automated infrastructure pruning')
   source = app.dig('spec','source')
   if source['directory']
-    check(app.dig('metadata','name') == 'controlplane-authentik', 'Only the Authentik root may use a directory source')
+    check(app.dig('metadata','name') == 'crossplane-authentik', 'Only the Authentik root may use a directory source')
     next
   end
   check(source['path'].start_with?('infrastructure/'), 'Platform services must remain separate from workload application charts')
@@ -333,7 +333,7 @@ check(remote_pki.none? { |o| o.dig('metadata','name')=='authentik-tofu' }, 'Spok
 authentik_app = by_name.fetch('authentik')
 check(authentik_app.dig('spec','source','path')=='infrastructure/charts/authentik', 'Authentik runtime chart path')
 check(authentik_app.dig('spec','destination','namespace')=='authentik', 'Authentik runtime deploys to namespace authentik')
-check(authentik_app.dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i < by_name.fetch('controlplane-authentik').dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i, 'Authentik runtime must sync before identity Workspace')
+check(authentik_app.dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i < by_name.fetch('crossplane-authentik').dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i, 'Authentik runtime must sync before identity Workspace')
 authentik_runtime = rendered.fetch('authentik')
 check(authentik_runtime.any? { |o| o['kind']=='Service' && o.dig('spec','type')=='NodePort' && (o.dig('spec','ports')||[]).any? { |p| p['nodePort']==30080 } }, 'Authentik server exposes HTTP NodePort 30080 for the Cloudflare tunnel')
 # Namespace admission, CSR address and storage policy selectors must still match actual dependency names.

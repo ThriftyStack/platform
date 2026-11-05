@@ -15,10 +15,10 @@ metadata:
     argocd.argoproj.io/sync-wave: '-35'
     argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
-  description: Management cluster platform charts and the controlplane Authentik root.
+  description: Management cluster platform charts and the crossplane Authentik root.
   sourceRepos:
     - {{ required "management project needs fleet.repository" .Values.fleet.repository | quote }}
-    - https://github.com/ThriftyStack/controlplane.git
+    - https://github.com/ThriftyStack/crossplane.git
   destinations:
     {{- range $namespaces | uniq }}
     - server: {{ $.Values.cluster.server | quote }}
