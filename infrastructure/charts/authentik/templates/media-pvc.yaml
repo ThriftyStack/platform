@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.media.claimName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: authentik
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: media
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.media.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.media.size }}
