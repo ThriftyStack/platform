@@ -207,16 +207,16 @@ services:
     wave: "75"
     path: infrastructure/charts/authentik
     namespace: authentik
-  # Argo needs no repo-creds while platform and controlplane stay public.
+  # Argo needs no repo-creds while platform and crossplane stay public.
   # crossplane-system Secret authentik-git-credentials key .git-credentials (empty file is enough for a public module URL).
   # crossplane-system Secret authentik-gcp-credentials key credentials.
-  - name: controlplane-authentik
+  - name: crossplane-authentik
     stage: foundation
     role: management
     wave: "80"
     path: deploy/authentik
     namespace: crossplane-system
-    repoURL: https://github.com/ThriftyStack/controlplane.git
+    repoURL: https://github.com/ThriftyStack/crossplane.git
     targetRevision: main
     directory: true
     syncOptions:

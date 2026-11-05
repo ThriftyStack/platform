@@ -1,7 +1,7 @@
 # Authentik runtime (management cluster)
 
 Helm wrapper around the official Authentik chart. Identity objects stay in
-`ThriftyStack/controlplane`. See ADR-0007.
+`ThriftyStack/crossplane`. See ADR-0007.
 
 ## Secrets
 
