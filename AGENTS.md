@@ -12,7 +12,7 @@ In the same task, update that page. If no page covers the change, add one under 
 
 Record a new decision as a new page under [ADRs](https://www.notion.so/400972443c708169b262e47f7c9c56e0).
 
-Never put secrets in Notion. Secrets include tokens, kubeconfigs, recovery shares, private keys, and NetBird setup keys.
+Never put secrets in Notion. Secrets include tokens, kubeconfigs, recovery shares, and private keys.
 
 ### Pages for this repository
 
@@ -22,10 +22,9 @@ Read the page that matches the change, then update that same page.
 | --- | --- |
 | [ThriftyStack Docs](https://www.notion.so/400972443c7081fd83efd3e8710fc9a6) | The docs root. Start here when no row below matches. |
 | [Vault](https://www.notion.so/400972443c70813db431fc0bc32215e2) | `infrastructure/charts/vault`, `infrastructure/configuration/vault-provider`, `vault-pki`, `vault-issuer`, or ceremony stages `vault`, `pki`, or `certificates`. |
-| [NetBird](https://www.notion.so/400972443c70815fb7b7db1baf120d43) | `infrastructure/charts/netbird` or `clusters/management/overrides/netbird.yaml`. |
 | [Disaster Recovery](https://www.notion.so/400972443c70814e9ebccf1806f12504) | Recovery shares, break-glass Vault recovery, or the protected Vault storage binding. |
-| [Authentik](https://www.notion.so/400972443c7081d2885dcba7e839fedf) | Authentik runtime chart `infrastructure/charts/authentik`, stage `authentik`, or identity dependency changes. Leave unchanged for Vault, NetBird, mesh, and ceremony edits that do not touch Authentik. |
-| [Systems](https://www.notion.so/400972443c7081658761c83b9fc2de16) | A new system. Add the new page under Systems. Systems is the parent of Authentik, Vault, and NetBird. |
+| [Authentik](https://www.notion.so/400972443c7081d2885dcba7e839fedf) | Authentik runtime chart `infrastructure/charts/authentik`, stage `authentik`, or identity dependency changes. Leave unchanged for Vault, mesh, and ceremony edits that do not touch Authentik. |
+| [Systems](https://www.notion.so/400972443c7081658761c83b9fc2de16) | A new system. Add the new page under Systems. Systems is the parent of Authentik and Vault. |
 | [ADRs](https://www.notion.so/400972443c708169b262e47f7c9c56e0) | A new decision. Add the ADR here. |
 
 Notion MCP can open a page only when the signed-in member can open it. Share [ThriftyStack Docs](https://www.notion.so/400972443c7081fd83efd3e8710fc9a6) with every person who uses these agents.

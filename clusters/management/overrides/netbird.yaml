@@ -1,3 +1,0 @@
-# Requires Secret netbird-setup-key (key NB_SETUP_KEY) in namespace netbird
-# from Vault infra/net/netbird field management-key. Rollback: set false.
-enabled: true

@@ -51,7 +51,7 @@ Ceremony::CLUSTER.each { |s| line(s, stages[s] ? 'enabled' : 'pending') }
 
 apps = case CLUSTER['role']
        when 'management'
-         %w[longhorn netbird crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik crossplane-authentik cilium-bgp]
+         %w[longhorn crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik crossplane-authentik cilium-bgp]
        else
          %w[external-secrets reloader cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment]
        end
