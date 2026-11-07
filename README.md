@@ -13,7 +13,7 @@ Workload Helm charts live in a separate repository: [`ThriftyStack/applications`
 
 | Path | Purpose |
 |------|---------|
-| `infrastructure/charts/` | Vendored platform Helm wrappers (includes management NetBird agents) |
+| `infrastructure/charts/` | Vendored platform Helm wrappers |
 | `infrastructure/configuration/` | Vault provider/PKI, mesh policy and qualification, management Cilium BGP |
 | `charts/cluster-apps/` | Staged Application rendering for a cluster |
 | `clusters/<id>/` | Platform identity, stage flags, and infrastructure overrides only |

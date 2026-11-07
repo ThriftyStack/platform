@@ -64,7 +64,7 @@ stage_flags = Ceremony::PROMOTABLE.flat_map { |s| ['--set', "stages.#{s}=true"] 
 management_docs = render(HELM, 'template', 'management', CHART, *cluster_profile('management'), *stage_flags)
 apps = management_docs.select { |o| o['kind']=='Application' }
 by_name = apps.to_h { |a| [a['metadata']['name'], a] }
-order = %w[longhorn netbird crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik crossplane-authentik cilium-bgp]
+order = %w[longhorn crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik crossplane-authentik cilium-bgp]
 waves = order.map { |name| by_name.fetch(name).dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave').to_i }
 check(waves.each_cons(2).all? { |a,b| a < b }, 'Dependency waves must follow deployment order')
 authentik = by_name.fetch('crossplane-authentik')

@@ -1,6 +1,0 @@
-apiVersion: v2
-name: thrifty-netbird
-description: NetBird routing-peer agents for the management cluster overlay
-type: application
-version: 0.1.2
-appVersion: "0.77.1"
