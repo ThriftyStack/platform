@@ -58,10 +58,10 @@ Do not remove shared monitoring infrastructure or clear metric history.
 
 ## Ordered follow-up stages
 
-1. Basic implementation: resources and companion dashboard/alerts prepared;
+1. Basic implementation: resources and companion dashboard/alerts deployed;
    platform `make check`, Ansible lint/syntax, 31 template renders, dashboard JSON
-   parsing, and Git whitespace checks passed. Live deployment and acceptance
-   remain pending approval.
+   parsing, and Git whitespace checks passed. Live acceptance passed: 8/8 targets
+   healthy, three exporters Ready, dashboard present, both alerts healthy/inactive.
 2. Backup and restoration (separate prompt): validate config recreation and
    define/test buffering and recovery requirements against estate backend backups.
 3. Security tightening (separate prompt): audit collector access and receiver
@@ -76,4 +76,20 @@ The estate backend query succeeded, showing OKE and estate jobs. Kubelet TLS on
 401). Python's older TLS runtime failed negotiation; curl verified successfully.
 
 Notion documentation deferred by explicit user instruction for this task.
-Last updated by: Codex — prepared management monitoring integration, 2026-11-11
+
+## Stage 1 runtime evidence (2026-11-11)
+
+Merged platform #15, home-deployments #31 and gcloud-home-infra #148. Argo deployed
+vmagent and kube-state-metrics (1/1 each) and node-exporter (3/3); HTTPS receiver
+queries confirmed all eight `up{cluster="management"}` targets equal 1. The
+monitoring apply completed with unreachable=0, failed=0. Grafana authenticated API
+returned Management Kubernetes, nine panels, UID `management-kubernetes`.
+vmalert reported both management rules health=ok, state=inactive, no lastError.
+Existing pinned community dashboards were refreshed and their existing fixups
+reapplied by the dashboard role during deployment.
+
+Runtime exposed vmagent's minimum 512 MiB queue chunk, larger than the original
+256 MB requested cap. The companion correction sets a 1 GiB cap with 1536 MiB
+emptyDir and 2 GiB ephemeral-storage limit; offline platform checks passed.
+
+Last updated by: Codex — recorded live management monitoring acceptance, 2026-11-11
