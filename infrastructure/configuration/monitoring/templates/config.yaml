@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmagent-config
+data:
+  scrape.yml: |
+    global:
+      scrape_interval: 30s
+      scrape_timeout: 10s
+      external_labels:
+        cluster: {{ .Values.cluster.id | quote }}
+        site: home
+    scrape_configs:
+      - job_name: management-vmagent
+        static_configs:
+          - targets: ["localhost:8429"]
+      - job_name: management-kube-state-metrics
+        static_configs:
+          - targets: ["kube-state-metrics:8080"]
+      - job_name: management-node
+        kubernetes_sd_configs:
+          - role: endpointslice
+            namespaces: { names: [{{ .Release.Namespace }}] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            regex: node-exporter
+            action: keep
+          - source_labels: [__meta_kubernetes_endpointslice_port_name]
+            regex: metrics
+            action: keep
+          - source_labels: [__meta_kubernetes_endpointslice_endpoint_conditions_ready]
+            regex: 'true'
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+      - job_name: management-cadvisor
+        scheme: https
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        metrics_path: /metrics/cadvisor
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_node_name]
+            target_label: node
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            regex: 'container_(cpu_usage_seconds_total|memory_working_set_bytes|network_receive_bytes_total|network_transmit_bytes_total|fs_usage_bytes|fs_limit_bytes)'
+            action: keep

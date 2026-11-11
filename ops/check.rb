@@ -452,3 +452,18 @@ check(hints == [Ceremony::PROMOTABLE.join('|'), Ceremony::PROMOTE_PR.join('|')],
 validation = File.read("#{ROOT}/charts/cluster-apps/templates/validation.yaml")
 check(!validation.include?('secrets'), 'validation.yaml must not chain the secrets stage')
 check(!validation.include?('bgp'), 'validation.yaml must not chain the bgp stage')
+
+monitoring = rendered.fetch('monitoring')
+agent_role = monitoring.find { |o| o['kind'] == 'ClusterRole' && o.dig('metadata', 'name') == 'management-vmagent' }
+check(agent_role && agent_role.fetch('rules').none? { |rule| (rule['resources'] || []).any? { |r| ['secrets', 'nodes/proxy', '*'].include?(r) } }, 'Management metrics must not grant secrets or kubelet proxy access')
+agent = monitoring.find { |o| o['kind'] == 'Deployment' && o.dig('metadata', 'name') == 'vmagent' }
+args = agent.dig('spec', 'template', 'spec', 'containers', 0, 'args')
+check(args.include?('-remoteWrite.url=https://metrics.adminio.biz/api/v1/write'), 'Management metrics use the existing HTTPS receiver')
+check(args.include?('-remoteWrite.maxDiskUsagePerURL=256MB'), 'Management metrics queue is bounded')
+config = monitoring.find { |o| o['kind'] == 'ConfigMap' }.dig('data', 'scrape.yml')
+scrape = YAML.safe_load(config)
+check(scrape.dig('global', 'external_labels') == {'cluster'=>'management', 'site'=>'home'}, 'Management series cannot collide with OKE series')
+cadvisor = scrape.fetch('scrape_configs').find { |j| j['job_name'] == 'management-cadvisor' }
+check(cadvisor['scheme'] == 'https' && cadvisor.dig('tls_config', 'ca_file') && !config.include?('insecure_skip_verify'), 'Kubelet TLS is verified with the mounted cluster CA')
+check(monitoring.none? { |o| ['Service', 'DaemonSet'].include?(o['kind']) && (o.dig('spec', 'type') == 'LoadBalancer' || o.dig('spec', 'template', 'spec', 'hostNetwork')) }, 'Management exporters have no LAN listener')
+puts 'Management monitoring isolation, RBAC and delivery contracts: passed'

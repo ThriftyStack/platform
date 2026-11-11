@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vmagent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: management-vmagent
+rules:
+  - apiGroups: ['']
+    resources: [nodes, pods, services]
+    verbs: [get, list, watch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+  - apiGroups: ['']
+    resources: [nodes/metrics]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: management-vmagent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: management-vmagent
+subjects:
+  - kind: ServiceAccount
+    name: vmagent
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmagent
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: vmagent }
+  template:
+    metadata:
+      labels: { app: vmagent }
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: vmagent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: vmagent
+          image: victoriametrics/vmagent:v1.149.0
+          args:
+            - -promscrape.config=/etc/vmagent/scrape.yml
+            - -remoteWrite.url={{ .Values.remoteWriteURL }}
+            - -remoteWrite.tmpDataPath=/queue
+            - -remoteWrite.maxDiskUsagePerURL=256MB
+            - -memory.allowedBytes=128MiB
+          ports:
+            - { name: http, containerPort: 8429 }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi, ephemeral-storage: 128Mi }
+            limits: { memory: 384Mi, ephemeral-storage: 512Mi }
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 15
+          volumeMounts:
+            - { name: config, mountPath: /etc/vmagent, readOnly: true }
+            - { name: queue, mountPath: /queue }
+      volumes:
+        - name: config
+          configMap: { name: vmagent-config }
+        - name: queue
+          emptyDir: { sizeLimit: 384Mi }

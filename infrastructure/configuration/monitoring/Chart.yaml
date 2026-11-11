@@ -1,0 +1,4 @@
+apiVersion: v2
+name: thrifty-monitoring
+version: 1.0.0
+description: Management cluster metrics forwarded to the estate VictoriaMetrics

@@ -1,0 +1,3 @@
+cluster:
+  id: management
+remoteWriteURL: https://metrics.adminio.biz/api/v1/write
