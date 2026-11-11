@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-exporter
+spec:
+  selector: { app: node-exporter }
+  ports:
+    - { name: metrics, port: 9100, targetPort: metrics }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: {{ .Release.Namespace }}
+  labels: { app: node-exporter }
+spec:
+  selector:
+    matchLabels: { app: node-exporter }
+  template:
+    metadata:
+      labels: { app: node-exporter }
+    spec:
+      automountServiceAccountToken: false
+      hostPID: true
+      tolerations:
+        - operator: Exists
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+      containers:
+        - name: node-exporter
+          image: quay.io/prometheus/node-exporter:v1.12.1
+          args:
+            - --path.procfs=/host/proc
+            - --path.sysfs=/host/sys
+            - --path.rootfs=/host/root
+            - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/containers|var/lib/kubelet/pods|host/root/var/lib/kubelet/pods)($|/)
+            - --web.listen-address=:9100
+          ports:
+            - { name: metrics, containerPort: 9100 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 96Mi }
+          volumeMounts:
+            - { name: proc, mountPath: /host/proc, readOnly: true }
+            - { name: sys, mountPath: /host/sys, readOnly: true }
+            - { name: root, mountPath: /host/root, readOnly: true, mountPropagation: HostToContainer }
+          readinessProbe:
+            httpGet: { path: /, port: 9100 }
+            initialDelaySeconds: 5
+      volumes:
+        - { name: proc, hostPath: { path: /proc } }
+        - { name: sys, hostPath: { path: /sys } }
+        - { name: root, hostPath: { path: / } }

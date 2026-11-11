@@ -71,3 +71,8 @@ CHART_CACHE=/path/to/public-cache HELM=/path/to/helm make check
 ```
 
 Bootstrap installs Argo CD and the management root; see the sibling `bootstrap` checkout for cluster bring-up, Vault/PKI runbooks and recovery.
+
+## Management metrics
+
+The management-only monitoring Application forwards node, object and container
+metrics to the estate Grafana backend. See [monitoring delivery and verification](infrastructure/configuration/monitoring/README.md).
