@@ -44,7 +44,7 @@ this chart adds no storage retention setting and collects no logs.
 
 ## Loss model and rollback
 
-The queue is a 384Mi emptyDir capped at 256MB by vmagent. It survives a container
+The queue is a 1536Mi emptyDir capped at 1GiB by vmagent. It survives a container
 restart, but pending unsent samples are lost when the pod is replaced; a long
 backend outage can drop queued samples at the cap. Collection also pauses while
 the single collector reschedules. These are explicit Stage 1 limits. History

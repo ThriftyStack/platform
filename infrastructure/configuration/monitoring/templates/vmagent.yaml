@@ -60,13 +60,13 @@ spec:
             - -promscrape.config=/etc/vmagent/scrape.yml
             - -remoteWrite.url={{ .Values.remoteWriteURL }}
             - -remoteWrite.tmpDataPath=/queue
-            - -remoteWrite.maxDiskUsagePerURL=256MB
+            - -remoteWrite.maxDiskUsagePerURL=1GiB
             - -memory.allowedBytes=128MiB
           ports:
             - { name: http, containerPort: 8429 }
           resources:
             requests: { cpu: 50m, memory: 128Mi, ephemeral-storage: 128Mi }
-            limits: { memory: 384Mi, ephemeral-storage: 512Mi }
+            limits: { memory: 384Mi, ephemeral-storage: 2Gi }
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
@@ -83,4 +83,4 @@ spec:
         - name: config
           configMap: { name: vmagent-config }
         - name: queue
-          emptyDir: { sizeLimit: 384Mi }
+          emptyDir: { sizeLimit: 1536Mi }
