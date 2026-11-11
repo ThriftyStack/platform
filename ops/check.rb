@@ -459,7 +459,7 @@ check(agent_role && agent_role.fetch('rules').none? { |rule| (rule['resources'] 
 agent = monitoring.find { |o| o['kind'] == 'Deployment' && o.dig('metadata', 'name') == 'vmagent' }
 args = agent.dig('spec', 'template', 'spec', 'containers', 0, 'args')
 check(args.include?('-remoteWrite.url=https://metrics.adminio.biz/api/v1/write'), 'Management metrics use the existing HTTPS receiver')
-check(args.include?('-remoteWrite.maxDiskUsagePerURL=256MB'), 'Management metrics queue is bounded')
+check(args.include?('-remoteWrite.maxDiskUsagePerURL=1GiB'), 'Management metrics queue is bounded')
 config = monitoring.find { |o| o['kind'] == 'ConfigMap' }.dig('data', 'scrape.yml')
 scrape = YAML.safe_load(config)
 check(scrape.dig('global', 'external_labels') == {'cluster'=>'management', 'site'=>'home'}, 'Management series cannot collide with OKE series')
