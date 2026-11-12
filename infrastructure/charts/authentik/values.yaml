@@ -30,9 +30,27 @@ backup:
     region: eu-poznan-1
     bucket: authentik-backups
     prefix: mgmt
+    # Namespaced SecretStore in this chart. The management AppProject has no
+    # ClusterSecretStore rule, and nothing else creates oke-vault.
     secretStore: oke-vault
-    secretStoreKind: ClusterSecretStore
-    vaultPath: infra/authentik/backup-minio
+    secretStoreKind: SecretStore
+    # KV v2 mount is infra. The policy reads infra/data/authentik/*.
+    vaultPath: authentik/backup-minio
+    vaultServer: https://vault.devoops.uk
+    vaultMount: infra
+    vaultKvVersion: v2
+    vaultAuthPath: jwt-management
+    # terraform vault/management_jwt.tf replaces "/" in authentik/authentik-eso.
+    vaultRole: authentik_authentik-eso
+    vaultAudience: vault-oke
+    esoServiceAccount: authentik-eso
+    controllerServiceAccount: external-secrets
+    controllerNamespace: external-secrets
+    listenerCaConfigMap: oke-vault-listener-ca
+    listenerCaKey: ca.crt
+    # Not a certificate. Replace with the DevOops Issuing CA E1 chain before
+    # the ExternalSecret can verify https://vault.devoops.uk.
+    listenerCa: PLACEHOLDER_NOT_A_CERTIFICATE
     accessKeyProperty: accessKey
     secretKeyProperty: secretKey
     secretName: authentik-backup-minio

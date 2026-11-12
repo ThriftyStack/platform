@@ -78,18 +78,41 @@ The tar is crash-consistent: Authentik may be writing files while tar runs, and
 tar treats a changed file as success.
 
 MinIO is `https://s3.adminio.biz:9000`, region `eu-poznan-1`, path-style.
-Credentials come from ExternalSecret `authentik-backup-minio`, which reads
-estate Vault KV `infra/authentik/backup-minio` (`accessKey`, `secretKey`)
-through ClusterSecretStore `oke-vault`. This chart does not create that store
-and does not contain credential values. The store is operator-owned. ADR-0008
-kept SecretStores out of the secrets stage, and the management AppProject
-still has no `external-secrets.io` cluster rule. ExternalSecret is namespaced,
-so this Application can sync it once the store exists.
+Credentials come from ExternalSecret `authentik-backup-minio`. This chart
+creates a namespaced SecretStore `oke-vault` in `authentik`. It does not
+create a ClusterSecretStore, and the management AppProject does not need a
+new cluster rule. ADR-0008 still keeps SecretStores out of the secrets stage.
 
-Seed the Vault path before expecting a green job. The role
-`authentik/authentik-eso` already has read on `infra/data/authentik/*`.
+The store talks to estate Vault at `https://vault.devoops.uk`, KV v2 mount
+`infra`, auth mount `jwt-management`, role `authentik_authentik-eso`
+(underscore: `vault/management_jwt.tf` derives that from
+`authentik/authentik-eso`), audience `vault-oke`. The token is minted for
+ServiceAccount `authentik-eso`. A Role in `authentik` lets the External
+Secrets controller ServiceAccount `external-secrets` in namespace
+`external-secrets` create that token and no other.
+
+The remote key is `authentik/backup-minio`. The mount is already `infra`, so
+the API path is `infra/data/authentik/backup-minio`, which matches the role
+policy `infra/data/authentik` and `infra/data/authentik/*`. A key of
+`infra/authentik/backup-minio` would look up the mount twice.
+
+```sh
+vault kv put -mount=infra authentik/backup-minio \
+  accessKey='<writer-key>' \
+  secretKey='<writer-secret>'
+```
+
 Use a credential that can write objects and cannot delete them. The bucket
-already has Object Lock GOVERNANCE for 30 days and an expiration rule.
+already has Object Lock GOVERNANCE for 30 days and an expiration rule. Do
+not commit those values.
+
+ConfigMap `oke-vault-listener-ca` must hold the public DevOops Issuing CA E1
+chain (include the root if E1 is an intermediate) as key `ca.crt`.
+`ThriftyStack/crossplane` `deploy/authentik/README.md` tells the operator to
+create ConfigMap `vault-oke-ca` and says that repository does not contain the
+PEM. This chart still has `PLACEHOLDER_NOT_A_CERTIFICATE`. The render check
+fails until that value is the real chain. Do not put a made-up certificate
+in its place.
 
 Images are pinned: `postgres:17.10-bookworm` (same tag as the bundled
 database), `jauderho/age:v1.3.2` (upstream age publishes no image; the binary

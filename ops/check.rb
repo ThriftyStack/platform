@@ -374,8 +374,32 @@ upload_script = scripts.dig('data','upload.sh').to_s
 check(upload_script.include?('COMPLETE') && !upload_script.match?(/s3\s+rm|s3api\s+delete|s3\s+rb|mc\s+rm/), 'Authentik backup uploads COMPLETE and does not delete bucket objects')
 check(authentik_runtime.none? { |o| o['kind']=='Secret' && o.dig('metadata','name')==authentik_values.dig('backup','minio','secretName') }, 'Authentik MinIO credentials are not rendered as a Secret')
 external_secret = authentik_runtime.find { |o| o['kind']=='ExternalSecret' && o.dig('metadata','name')==authentik_values.dig('backup','minio','secretName') }
-check(external_secret && external_secret.dig('spec','secretStoreRef','name')==authentik_values.dig('backup','minio','secretStore') && external_secret.dig('spec','secretStoreRef','kind')=='ClusterSecretStore', 'Authentik backup MinIO ExternalSecret uses the estate ClusterSecretStore')
-check((external_secret.dig('spec','data') || []).all? { |row| row.dig('remoteRef','key')=='infra/authentik/backup-minio' }, 'Authentik backup MinIO path is infra/authentik/backup-minio')
+check(external_secret && external_secret.dig('spec','secretStoreRef','name')=='oke-vault' && external_secret.dig('spec','secretStoreRef','kind')=='SecretStore', 'Authentik backup MinIO ExternalSecret uses the namespaced SecretStore')
+check(external_secret.dig('metadata','namespace')=='authentik', 'Authentik backup ExternalSecret stays in namespace authentik')
+check((external_secret.dig('spec','data') || []).all? { |row| row.dig('remoteRef','key')=='authentik/backup-minio' }, 'Authentik backup MinIO key is authentik/backup-minio under the infra mount')
+check(authentik_runtime.none? { |o| o['kind']=='ClusterSecretStore' }, 'Authentik chart does not render a ClusterSecretStore')
+store = authentik_runtime.find { |o| o['kind']=='SecretStore' && o.dig('metadata','name')=='oke-vault' }
+vault = store && store.dig('spec','provider','vault')
+check(store && store.dig('metadata','namespace')=='authentik', 'SecretStore oke-vault is namespaced to authentik')
+check(vault && vault['server']=='https://vault.devoops.uk' && vault['path']=='infra' && vault['version']=='v2', 'SecretStore reads estate Vault KV v2 mount infra')
+ca_provider = vault && vault['caProvider']
+check(ca_provider == {'type'=>'ConfigMap','name'=>'oke-vault-listener-ca','key'=>'ca.crt'}, 'SecretStore trusts the namespaced listener CA ConfigMap')
+jwt = vault && vault.dig('auth','jwt')
+check(jwt && jwt['path']=='jwt-management' && jwt['role']=='authentik_authentik-eso', 'SecretStore uses jwt-management role authentik_authentik-eso')
+token_ref = jwt && jwt.dig('kubernetesServiceAccountToken','serviceAccountRef')
+check(token_ref && token_ref['name']=='authentik-eso' && token_ref['audiences']==['vault-oke'], 'SecretStore token audience is vault-oke for ServiceAccount authentik-eso')
+eso_sa = authentik_runtime.find { |o| o['kind']=='ServiceAccount' && o.dig('metadata','name')=='authentik-eso' }
+check(eso_sa && eso_sa.dig('metadata','namespace')=='authentik' && eso_sa['automountServiceAccountToken']==false, 'authentik-eso does not mount a token')
+token_role = authentik_runtime.find { |o| o['kind']=='Role' && o.dig('metadata','name')=='authentik-eso-token' }
+token_rule = token_role && token_role.fetch('rules').find { |rule| (rule['resources'] || []).include?('serviceaccounts/token') }
+check(token_role && token_role.dig('metadata','namespace')=='authentik' && token_rule && token_rule['verbs']==['create'] && token_rule['resourceNames']==['authentik-eso'], 'Only the External Secrets controller can mint an authentik-eso token')
+token_binding = authentik_runtime.find { |o| o['kind']=='RoleBinding' && o.dig('metadata','name')=='authentik-eso-token' }
+eso_controller = rendered.fetch('external-secrets').find { |o| o['kind']=='Deployment' && o.dig('metadata','name')=='external-secrets' }
+controller_sa = eso_controller.dig('spec','template','spec','serviceAccountName')
+check(controller_sa=='external-secrets' && eso_controller.dig('metadata','namespace')=='external-secrets', 'External Secrets controller ServiceAccount is external-secrets/external-secrets')
+check(token_binding && token_binding.dig('subjects')==[{'kind'=>'ServiceAccount','name'=>controller_sa,'namespace'=>eso_controller.dig('metadata','namespace')}], 'Token RoleBinding names the rendered External Secrets controller ServiceAccount')
+listener_ca = authentik_runtime.find { |o| o['kind']=='ConfigMap' && o.dig('metadata','name')=='oke-vault-listener-ca' }
+check(listener_ca && listener_ca.dig('metadata','namespace')=='authentik' && listener_ca.dig('data','ca.crt'), 'OKE Vault listener CA ConfigMap is in namespace authentik')
 check(!authentik_runtime.to_json.include?('AGE-SECRET-KEY'), 'Authentik render contains no age identity')
 check(authentik_values.dig('backup','ageRecipient')=='age1s7npftgtwq3ylwy5cpyederc3tawwgz2shdrr9m8csrs85e5d4ysx0e9y5', 'Authentik backup recipient is the offline public key')
 check(authentik_values.dig('backup','ageRecipient')!='age1REPLACE_ME', 'Authentik backup recipient is not the placeholder')
@@ -518,3 +542,5 @@ cadvisor = scrape.fetch('scrape_configs').find { |j| j['job_name'] == 'managemen
 check(cadvisor['scheme'] == 'https' && cadvisor.dig('tls_config', 'ca_file') && !config.include?('insecure_skip_verify'), 'Kubelet TLS is verified with the mounted cluster CA')
 check(monitoring.none? { |o| ['Service', 'DaemonSet'].include?(o['kind']) && (o.dig('spec', 'type') == 'LoadBalancer' || o.dig('spec', 'template', 'spec', 'hostNetwork')) }, 'Management exporters have no LAN listener')
 puts 'Management monitoring isolation, RBAC and delivery contracts: passed'
+listener_pem = authentik_runtime.find { |o| o['kind']=='ConfigMap' && o.dig('metadata','name')=='oke-vault-listener-ca' }.dig('data','ca.crt').to_s
+check(listener_pem.include?('BEGIN CERTIFICATE') && !listener_pem.include?('PLACEHOLDER'), 'OKE Vault listener CA is the DevOops issuing chain, not PLACEHOLDER')
