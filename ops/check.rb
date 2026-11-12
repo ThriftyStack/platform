@@ -360,7 +360,9 @@ worker_claim = (authentik_worker.dig('spec','template','spec','volumes') || []).
 check(server_claim&.dig('persistentVolumeClaim','claimName')==authentik_values.dig('media','claimName') && worker_claim&.dig('persistentVolumeClaim','claimName')==authentik_values.dig('media','claimName'), 'Authentik server and worker mount the wrapper media PVC')
 [authentik_server, authentik_worker].each do |deploy|
   strategy = deploy.dig('spec','strategy') || {}
+  sync_options = deploy.dig('metadata','annotations','argocd.argoproj.io/sync-options').to_s.split(',').map(&:strip)
   check(strategy['type']=='Recreate' && !strategy.key?('rollingUpdate'), "#{deploy.dig('metadata','name')} uses Recreate with no rollingUpdate")
+  check(sync_options.include?('Replace=true') && sync_options.include?('ServerSideApply=false'), "#{deploy.dig('metadata','name')} is replaced so a live rollingUpdate is cleared")
 end
 check(authentik_server.dig('spec','template','spec','securityContext','fsGroup')==1000 && authentik_worker.dig('spec','template','spec','securityContext','fsGroup')==1000, 'Authentik media volume is writable by uid 1000')
 worker_affinity = authentik_worker.dig('spec','template','spec','affinity','podAffinity','requiredDuringSchedulingIgnoredDuringExecution') || []

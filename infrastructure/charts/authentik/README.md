@@ -53,8 +53,11 @@ kubectl -n authentik delete pvc authentik-data
 Longhorn RWO attaches to one node. The worker's required pod affinity follows
 the server pod onto that node, and server and worker use `Recreate` so a
 rollout drops the old pod before the new one mounts the volume. The upstream
-helper renders `type: Recreate` and omits `rollingUpdate`. The backup pod
-uses the same affinity and mounts the claim read-only.
+helper renders `type: Recreate` and omits `rollingUpdate`. Server-side apply
+would keep a live `rollingUpdate`, which admission rejects. Both Deployments
+sync with `Replace=true` and `ServerSideApply=false`, so Argo writes the
+rendered spec and drops that field. The backup pod uses the same affinity
+and mounts the claim read-only.
 
 The chart's soft anti-affinity preset prefers a different node. The worker
 replaces that preset. With one replica of each, both pods and the backup pod

@@ -119,9 +119,12 @@ authentik:
   server:
     replicas: 1
     # One RWO mount. Recreate releases the volume before the next pod starts.
-    # The upstream helper emits only `type: Recreate` and drops rollingUpdate.
+    # The upstream helper omits rollingUpdate. Server-side apply would keep a
+    # live value, and Recreate then fails admission. Replace writes this spec.
     deploymentStrategy:
       type: Recreate
+    deploymentAnnotations:
+      argocd.argoproj.io/sync-options: Replace=true,ServerSideApply=false
     securityContext:
       fsGroup: 1000
       fsGroupChangePolicy: OnRootMismatch
@@ -141,6 +144,8 @@ authentik:
     replicas: 1
     deploymentStrategy:
       type: Recreate
+    deploymentAnnotations:
+      argocd.argoproj.io/sync-options: Replace=true,ServerSideApply=false
     securityContext:
       fsGroup: 1000
       fsGroupChangePolicy: OnRootMismatch
