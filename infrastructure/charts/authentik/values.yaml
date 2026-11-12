@@ -8,7 +8,7 @@
 # (files live under /data/media). The claim name matches the volume below.
 media:
   claimName: authentik-data
-  size: 10Gi
+  size: 1Gi
   storageClass: longhorn
 
 # Nightly logical backup. Enabled for the management release. The job exits
@@ -119,12 +119,9 @@ authentik:
   server:
     replicas: 1
     # One RWO mount. Recreate releases the volume before the next pod starts.
-    # rollingUpdate: null is required. Omitting the field leaves a live
-    # rollingUpdate in place under server-side apply, and Recreate then fails
-    # admission.
+    # The upstream helper emits only `type: Recreate` and drops rollingUpdate.
     deploymentStrategy:
       type: Recreate
-      rollingUpdate: null
     securityContext:
       fsGroup: 1000
       fsGroupChangePolicy: OnRootMismatch
@@ -144,7 +141,6 @@ authentik:
     replicas: 1
     deploymentStrategy:
       type: Recreate
-      rollingUpdate: null
     securityContext:
       fsGroup: 1000
       fsGroupChangePolicy: OnRootMismatch

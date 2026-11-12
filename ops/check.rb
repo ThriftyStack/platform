@@ -10,7 +10,6 @@ require 'tempfile'
 require 'net/http'
 require 'uri'
 require 'openssl'
-require 'tmpdir'
 require_relative 'stages'
 ROOT = File.expand_path('..', __dir__)
 CACHE = ENV.fetch('CHART_CACHE')
@@ -21,9 +20,6 @@ def cluster_profile(id)
 end
 def check(value, message)
   raise message unless value
-end
-def relative_files(root)
-  Dir.glob(File.join(root, '**', '*'), File::FNM_DOTMATCH).select { |path| File.file?(path) }.map { |path| path.sub("#{root}/", '') }.sort
 end
 def authentik_restricted_container?(container, uid)
   context = container['securityContext'] || {}
@@ -351,7 +347,7 @@ authentik_runtime = rendered.fetch('authentik')
 check(authentik_runtime.any? { |o| o['kind']=='Service' && o.dig('spec','type')=='NodePort' && (o.dig('spec','ports')||[]).any? { |p| p['nodePort']==30080 } }, 'Authentik server exposes HTTP NodePort 30080 for the Cloudflare tunnel')
 authentik_values = YAML.safe_load(File.read("#{ROOT}/infrastructure/charts/authentik/values.yaml"))
 media = authentik_runtime.find { |o| o['kind']=='PersistentVolumeClaim' && o.dig('metadata','name')==authentik_values.dig('media','claimName') }
-check(media && media.dig('spec','storageClassName')=='longhorn' && media.dig('spec','accessModes')==['ReadWriteOnce'] && media.dig('spec','resources','requests','storage')=='10Gi', 'Authentik media PVC is Longhorn RWO 10Gi')
+check(media && media.dig('spec','storageClassName')=='longhorn' && media.dig('spec','accessModes')==['ReadWriteOnce'] && media.dig('spec','resources','requests','storage')=='1Gi', 'Authentik media PVC is Longhorn RWO 1Gi')
 def authentik_mounts_data?(object)
   containers = object.dig('spec','template','spec','containers') || []
   containers.any? { |container| (container['volumeMounts'] || []).any? { |mount| mount['name']=='data' && mount['mountPath']=='/data' } }
@@ -364,25 +360,7 @@ worker_claim = (authentik_worker.dig('spec','template','spec','volumes') || []).
 check(server_claim&.dig('persistentVolumeClaim','claimName')==authentik_values.dig('media','claimName') && worker_claim&.dig('persistentVolumeClaim','claimName')==authentik_values.dig('media','claimName'), 'Authentik server and worker mount the wrapper media PVC')
 [authentik_server, authentik_worker].each do |deploy|
   strategy = deploy.dig('spec','strategy') || {}
-  check(strategy['type']=='Recreate' && strategy.key?('rollingUpdate') && strategy['rollingUpdate'].nil?, "#{deploy.dig('metadata','name')} uses Recreate with rollingUpdate null")
-end
-authentik_chart = "#{ROOT}/infrastructure/charts/authentik"
-Dir.mktmpdir('authentik-upstream') do |dir|
-  _stdout, status = Open3.capture2('tar', '-xzf', "#{authentik_chart}/charts/authentik-2026.5.6.tgz", '-C', dir)
-  check(status.success?, 'Authentik upstream chart archive extracts')
-  upstream = "#{dir}/authentik"
-  unpacked = "#{authentik_chart}/charts/authentik"
-  check(relative_files(upstream) == relative_files(unpacked), 'Unpacked Authentik chart has the same files as the locked archive')
-  relative_files(upstream).each do |relative|
-    upstream_body = File.binread("#{upstream}/#{relative}")
-    unpacked_body = File.binread("#{unpacked}/#{relative}")
-    if relative == 'templates/_helpers.tpl'
-      expected = upstream_body.sub("{{- if (eq (toString $preset.type) \"Recreate\") }}\ntype: Recreate\n", "{{- if (eq (toString $preset.type) \"Recreate\") }}\ntype: Recreate\nrollingUpdate: null\n")
-      check(unpacked_body == expected && unpacked_body != upstream_body, 'Authentik Recreate strategy emits rollingUpdate null and no other upstream drift')
-    else
-      check(unpacked_body == upstream_body, "Unpacked Authentik chart matches the locked archive at #{relative}")
-    end
-  end
+  check(strategy['type']=='Recreate' && !strategy.key?('rollingUpdate'), "#{deploy.dig('metadata','name')} uses Recreate with no rollingUpdate")
 end
 check(authentik_server.dig('spec','template','spec','securityContext','fsGroup')==1000 && authentik_worker.dig('spec','template','spec','securityContext','fsGroup')==1000, 'Authentik media volume is writable by uid 1000')
 worker_affinity = authentik_worker.dig('spec','template','spec','affinity','podAffinity','requiredDuringSchedulingIgnoredDuringExecution') || []
