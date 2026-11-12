@@ -377,8 +377,14 @@ external_secret = authentik_runtime.find { |o| o['kind']=='ExternalSecret' && o.
 check(external_secret && external_secret.dig('spec','secretStoreRef','name')==authentik_values.dig('backup','minio','secretStore') && external_secret.dig('spec','secretStoreRef','kind')=='ClusterSecretStore', 'Authentik backup MinIO ExternalSecret uses the estate ClusterSecretStore')
 check((external_secret.dig('spec','data') || []).all? { |row| row.dig('remoteRef','key')=='infra/authentik/backup-minio' }, 'Authentik backup MinIO path is infra/authentik/backup-minio')
 check(!authentik_runtime.to_json.include?('AGE-SECRET-KEY'), 'Authentik render contains no age identity')
+check(authentik_values.dig('backup','ageRecipient')=='age1s7npftgtwq3ylwy5cpyederc3tawwgz2shdrr9m8csrs85e5d4ysx0e9y5', 'Authentik backup recipient is the offline public key')
+check(authentik_values.dig('backup','ageRecipient')!='age1REPLACE_ME', 'Authentik backup recipient is not the placeholder')
 restore_job = authentik_runtime.find { |o| o['kind']=='CronJob' && o.dig('metadata','name')=='authentik-backup-restore-test' }
 check(restore_job && restore_job.dig('spec','suspend')==true, 'Authentik restore-test CronJob is suspended')
+restore_pod = restore_job.dig('spec','jobTemplate','spec','template','spec')
+postgres_sidecar = (restore_pod['initContainers'] || []).find { |container| container['name']=='postgres' }
+check(postgres_sidecar && postgres_sidecar['restartPolicy']=='Always', 'Throwaway Postgres is a native sidecar so the restore Job can complete')
+check((restore_pod['containers'] || []).map { |container| container['name'] }==['restore'], 'Restore test has one app container so Job success follows restore.sh')
 restore_script = scripts.dig('data','restore.sh').to_s
 check(restore_script.include?('pg_restore') && restore_script.include?('authentik_core_user'), 'Authentik restore-test restores into throwaway Postgres and counts authentik_core_user')
 # Namespace admission, CSR address and storage policy selectors must still match actual dependency names.

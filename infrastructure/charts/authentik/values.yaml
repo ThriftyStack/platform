@@ -16,7 +16,7 @@ media:
 backup:
   enabled: true
   schedule: "15 3 * * *"
-  ageRecipient: age1REPLACE_ME
+  ageRecipient: age1s7npftgtwq3ylwy5cpyederc3tawwgz2shdrr9m8csrs85e5d4ysx0e9y5
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
   postgres:

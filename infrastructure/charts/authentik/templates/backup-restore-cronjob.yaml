@@ -71,8 +71,10 @@ spec:
                 - name: identity
                   mountPath: /identity
                   readOnly: true
-          containers:
+            # Native sidecar: stays up while restore runs, then the kubelet
+            # stops it when restore exits so the Job can succeed.
             - name: postgres
+              restartPolicy: Always
               image: {{ .Values.backup.images.postgres | quote }}
               imagePullPolicy: IfNotPresent
               env:
@@ -84,6 +86,11 @@ spec:
                   value: authentik
                 - name: PGDATA
                   value: /var/lib/postgresql/data/pgdata
+              startupProbe:
+                exec:
+                  command: ["pg_isready", "-U", "authentik", "-d", "authentik"]
+                periodSeconds: 2
+                failureThreshold: 60
               resources:
                 requests:
                   cpu: 50m
@@ -93,6 +100,7 @@ spec:
               volumeMounts:
                 - name: pgdata
                   mountPath: /var/lib/postgresql/data
+          containers:
             - name: restore
               image: {{ .Values.backup.images.postgres | quote }}
               imagePullPolicy: IfNotPresent

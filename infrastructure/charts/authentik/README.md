@@ -57,10 +57,9 @@ must land on the server pod's node.
 `backup.enabled` defaults to true. Schedule is `15 3 * * *` (03:15 UTC).
 `concurrencyPolicy` is `Forbid`.
 
-`backup.ageRecipient` ships as `age1REPLACE_ME`. The dump container exits
-before `pg_dump` while that placeholder is set. Replace it with the offline
-age public key. The private identity stays off the cluster except during a
-restore test.
+`backup.ageRecipient` is the offline age public key. The dump container
+still exits before `pg_dump` if that value is put back to `age1REPLACE_ME`.
+The private identity stays off the cluster except during a restore test.
 
 Each successful run uploads one prefix:
 
@@ -165,8 +164,9 @@ CronJob `authentik-backup-restore-test` is suspended (`30 4 1 * *` does not
 fire). It downloads the newest `mgmt/` prefix that has `COMPLETE`, checks
 `SHA256SUMS`, decrypts the dump, and restores it into a Postgres 17 container
 in the same pod (emptyDir, password `restore-test`, not the estate database).
-The job prints `authentik_core_user` and fails unless `django_migrations` is
-at least 1.
+Postgres is a native sidecar: it stays up for the restore, and the kubelet
+stops it when the restore container exits so the Job can complete. The job
+prints `authentik_core_user` and fails unless `django_migrations` is at least 1.
 
 Once a month, after at least one prefix has `COMPLETE`:
 
