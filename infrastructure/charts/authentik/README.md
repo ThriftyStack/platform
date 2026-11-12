@@ -106,13 +106,13 @@ Use a credential that can write objects and cannot delete them. The bucket
 already has Object Lock GOVERNANCE for 30 days and an expiration rule. Do
 not commit those values.
 
-ConfigMap `oke-vault-listener-ca` must hold the public DevOops Issuing CA E1
-chain (include the root if E1 is an intermediate) as key `ca.crt`.
-`ThriftyStack/crossplane` `deploy/authentik/README.md` tells the operator to
-create ConfigMap `vault-oke-ca` and says that repository does not contain the
-PEM. This chart still has `PLACEHOLDER_NOT_A_CERTIFICATE`. The render check
-fails until that value is the real chain. Do not put a made-up certificate
-in its place.
+ConfigMap `oke-vault-listener-ca` holds the public listener chain as key
+`ca.crt`: DevOops Issuing CA E1, then DevOops Root CA R1. E1 is issued by
+R1 and expires 2031-09-05. R1 is self-signed and expires 2036-09-03. The
+render check rejects `PLACEHOLDER`, a private key, a non-PEM, or any chain
+whose subjects are not those two names. `vault.devoops.uk` presents a leaf
+for `CN=vault.internal` issued by E1, so this bundle is what the store uses
+to verify that leaf.
 
 Images are pinned: `postgres:17.10-bookworm` (same tag as the bundled
 database), `jauderho/age:v1.3.2` (upstream age publishes no image; the binary

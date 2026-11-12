@@ -9,6 +9,7 @@ require 'open3'
 require 'tempfile'
 require 'net/http'
 require 'uri'
+require 'openssl'
 require_relative 'stages'
 ROOT = File.expand_path('..', __dir__)
 CACHE = ENV.fetch('CHART_CACHE')
@@ -543,4 +544,19 @@ check(cadvisor['scheme'] == 'https' && cadvisor.dig('tls_config', 'ca_file') && 
 check(monitoring.none? { |o| ['Service', 'DaemonSet'].include?(o['kind']) && (o.dig('spec', 'type') == 'LoadBalancer' || o.dig('spec', 'template', 'spec', 'hostNetwork')) }, 'Management exporters have no LAN listener')
 puts 'Management monitoring isolation, RBAC and delivery contracts: passed'
 listener_pem = authentik_runtime.find { |o| o['kind']=='ConfigMap' && o.dig('metadata','name')=='oke-vault-listener-ca' }.dig('data','ca.crt').to_s
-check(listener_pem.include?('BEGIN CERTIFICATE') && !listener_pem.include?('PLACEHOLDER'), 'OKE Vault listener CA is the DevOops issuing chain, not PLACEHOLDER')
+check(listener_pem == authentik_values.dig('backup','minio','listenerCa'), 'Rendered listener CA matches backup.minio.listenerCa byte for byte')
+check(listener_pem.include?('BEGIN CERTIFICATE') && !listener_pem.include?('PLACEHOLDER') && !listener_pem.include?('PRIVATE KEY'), 'OKE Vault listener CA is a public PEM, not PLACEHOLDER')
+blocks = listener_pem.scan(/-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----/m)
+certs = blocks.map do |block|
+  OpenSSL::X509::Certificate.new(block)
+rescue OpenSSL::X509::CertificateError
+  nil
+end
+check(certs.length == 2 && certs.none?(&:nil?) && listener_pem.sub(/-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----\n?/m, '').strip.empty?, 'OKE Vault listener CA is exactly two certificates')
+cn = ->(name) { name.to_a.assoc('CN')&.at(1) }
+check(cn.call(certs[0].subject) == 'DevOops Issuing CA E1' && cn.call(certs[0].issuer) == 'DevOops Root CA R1', 'First certificate is DevOops Issuing CA E1 issued by R1')
+check(cn.call(certs[1].subject) == 'DevOops Root CA R1' && cn.call(certs[1].issuer) == 'DevOops Root CA R1', 'Second certificate is self-signed DevOops Root CA R1')
+check(certs[0].not_after.utc.strftime('%Y-%m-%d') == '2031-09-05' && certs[1].not_after.utc.strftime('%Y-%m-%d') == '2036-09-03', 'Issuing chain dates are E1 2031-09-05 and R1 2036-09-03')
+trust = OpenSSL::X509::Store.new
+trust.add_cert(certs[1])
+check(trust.verify(certs[0]), 'DevOops Issuing CA E1 verifies under DevOops Root CA R1')
