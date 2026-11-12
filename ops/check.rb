@@ -25,6 +25,14 @@ end
 def relative_files(root)
   Dir.glob(File.join(root, '**', '*'), File::FNM_DOTMATCH).select { |path| File.file?(path) }.map { |path| path.sub("#{root}/", '') }.sort
 end
+def authentik_restricted_container?(container, uid)
+  context = container['securityContext'] || {}
+  tmp = (container['volumeMounts'] || []).find { |mount| mount['mountPath']=='/tmp' }
+  context['runAsNonRoot']==true && context['runAsUser']==uid && context['runAsGroup']==uid &&
+    context['allowPrivilegeEscalation']==false && context['readOnlyRootFilesystem']==true &&
+    context.dig('seccompProfile','type')=='RuntimeDefault' && context.dig('capabilities','drop')==['ALL'] &&
+    (context.dig('capabilities','add') || []).empty? && tmp && tmp['name']=='tmp' && tmp['readOnly']!=true
+end
 def documents(text)
   text.split(/^---\s*$/).reject { |s| s.strip.empty? }.map { |s| YAML.safe_load(s, permitted_classes: [Time], aliases: true) }.compact
 end
@@ -435,6 +443,24 @@ restore_pod = restore_job.dig('spec','jobTemplate','spec','template','spec')
 postgres_sidecar = (restore_pod['initContainers'] || []).find { |container| container['name']=='postgres' }
 check(postgres_sidecar && postgres_sidecar['restartPolicy']=='Always', 'Throwaway Postgres is a native sidecar so the restore Job can complete')
 check((restore_pod['containers'] || []).map { |container| container['name'] }==['restore'], 'Restore test has one app container so Job success follows restore.sh')
+[backup_pod, restore_pod].each do |pod|
+  context = pod['securityContext'] || {}
+  check(context['runAsNonRoot']==true && context['runAsUser']==1000 && context['runAsGroup']==1000 && context['fsGroup']==1000 && context.dig('seccompProfile','type')=='RuntimeDefault', 'Authentik backup pods run as uid 1000 under restricted PodSecurity')
+  tmp_volume = (pod['volumes'] || []).find { |volume| volume['name']=='tmp' }
+  check(tmp_volume && tmp_volume['emptyDir'], 'Authentik backup pods give containers a writable emptyDir at /tmp')
+  containers = (pod['initContainers'] || []) + (pod['containers'] || [])
+  containers.each do |container|
+    uid = container['name']=='postgres' ? 999 : 1000
+    check(authentik_restricted_container?(container, uid), "Authentik #{container['name']} meets restricted PodSecurity as uid #{uid}")
+  end
+end
+postgres_data = (postgres_sidecar['volumeMounts'] || []).find { |mount| mount['mountPath']=='/var/lib/postgresql/data' }
+postgres_socket = (postgres_sidecar['volumeMounts'] || []).find { |mount| mount['mountPath']=='/var/run/postgresql' }
+check(postgres_data && postgres_data['name']=='pgdata' && postgres_socket && postgres_socket['name']=='pgrun', 'Throwaway Postgres keeps writable data and socket directories')
+%w[pgdata pgrun].each do |name|
+  volume = (restore_pod['volumes'] || []).find { |item| item['name']==name }
+  check(volume && volume['emptyDir'], "Throwaway Postgres #{name} is an emptyDir")
+end
 restore_script = scripts.dig('data','restore.sh').to_s
 check(restore_script.include?('pg_restore') && restore_script.include?('authentik_core_user'), 'Authentik restore-test restores into throwaway Postgres and counts authentik_core_user')
 # Namespace admission, CSR address and storage policy selectors must still match actual dependency names.

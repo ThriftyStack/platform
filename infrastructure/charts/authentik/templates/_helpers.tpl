@@ -63,6 +63,28 @@ podAffinity:
   value: {{ .Values.backup.minio.prefix | quote }}
 {{- end }}
 
+{{- define "thrifty-authentik.restrictedPod" -}}
+runAsNonRoot: true
+runAsUser: 1000
+runAsGroup: 1000
+fsGroup: 1000
+seccompProfile:
+  type: RuntimeDefault
+{{- end }}
+
+{{- define "thrifty-authentik.restrictedContainer" -}}
+runAsNonRoot: true
+runAsUser: {{ .runAsUser }}
+runAsGroup: {{ .runAsGroup }}
+allowPrivilegeEscalation: false
+readOnlyRootFilesystem: true
+seccompProfile:
+  type: RuntimeDefault
+capabilities:
+  drop:
+    - ALL
+{{- end }}
+
 {{- define "thrifty-authentik.ageEncrypt" -}}
 - name: encrypt-{{ .file | replace "." "-" }}
   image: {{ .root.Values.backup.images.age | quote }}
@@ -80,7 +102,11 @@ podAffinity:
       memory: 32Mi
     limits:
       memory: 128Mi
+  securityContext:
+    {{- include "thrifty-authentik.restrictedContainer" (dict "runAsUser" 1000 "runAsGroup" 1000) | nindent 4 }}
   volumeMounts:
     - name: work
       mountPath: /work
+    - name: tmp
+      mountPath: /tmp
 {{- end }}
