@@ -10,6 +10,7 @@ require 'tempfile'
 require 'net/http'
 require 'uri'
 require 'openssl'
+require 'tmpdir'
 require_relative 'stages'
 ROOT = File.expand_path('..', __dir__)
 CACHE = ENV.fetch('CHART_CACHE')
@@ -20,6 +21,9 @@ def cluster_profile(id)
 end
 def check(value, message)
   raise message unless value
+end
+def relative_files(root)
+  Dir.glob(File.join(root, '**', '*'), File::FNM_DOTMATCH).select { |path| File.file?(path) }.map { |path| path.sub("#{root}/", '') }.sort
 end
 def documents(text)
   text.split(/^---\s*$/).reject { |s| s.strip.empty? }.map { |s| YAML.safe_load(s, permitted_classes: [Time], aliases: true) }.compact
@@ -350,7 +354,28 @@ check(authentik_mounts_data?(authentik_server) && authentik_mounts_data?(authent
 server_claim = (authentik_server.dig('spec','template','spec','volumes') || []).find { |volume| volume['name']=='data' }
 worker_claim = (authentik_worker.dig('spec','template','spec','volumes') || []).find { |volume| volume['name']=='data' }
 check(server_claim&.dig('persistentVolumeClaim','claimName')==authentik_values.dig('media','claimName') && worker_claim&.dig('persistentVolumeClaim','claimName')==authentik_values.dig('media','claimName'), 'Authentik server and worker mount the wrapper media PVC')
-check(authentik_server.dig('spec','strategy','type')=='Recreate' && authentik_worker.dig('spec','strategy','type')=='Recreate', 'Authentik media rollout uses Recreate so the RWO volume is released')
+[authentik_server, authentik_worker].each do |deploy|
+  strategy = deploy.dig('spec','strategy') || {}
+  check(strategy['type']=='Recreate' && strategy.key?('rollingUpdate') && strategy['rollingUpdate'].nil?, "#{deploy.dig('metadata','name')} uses Recreate with rollingUpdate null")
+end
+authentik_chart = "#{ROOT}/infrastructure/charts/authentik"
+Dir.mktmpdir('authentik-upstream') do |dir|
+  _stdout, status = Open3.capture2('tar', '-xzf', "#{authentik_chart}/charts/authentik-2026.5.6.tgz", '-C', dir)
+  check(status.success?, 'Authentik upstream chart archive extracts')
+  upstream = "#{dir}/authentik"
+  unpacked = "#{authentik_chart}/charts/authentik"
+  check(relative_files(upstream) == relative_files(unpacked), 'Unpacked Authentik chart has the same files as the locked archive')
+  relative_files(upstream).each do |relative|
+    upstream_body = File.binread("#{upstream}/#{relative}")
+    unpacked_body = File.binread("#{unpacked}/#{relative}")
+    if relative == 'templates/_helpers.tpl'
+      expected = upstream_body.sub("{{- if (eq (toString $preset.type) \"Recreate\") }}\ntype: Recreate\n", "{{- if (eq (toString $preset.type) \"Recreate\") }}\ntype: Recreate\nrollingUpdate: null\n")
+      check(unpacked_body == expected && unpacked_body != upstream_body, 'Authentik Recreate strategy emits rollingUpdate null and no other upstream drift')
+    else
+      check(unpacked_body == upstream_body, "Unpacked Authentik chart matches the locked archive at #{relative}")
+    end
+  end
+end
 check(authentik_server.dig('spec','template','spec','securityContext','fsGroup')==1000 && authentik_worker.dig('spec','template','spec','securityContext','fsGroup')==1000, 'Authentik media volume is writable by uid 1000')
 worker_affinity = authentik_worker.dig('spec','template','spec','affinity','podAffinity','requiredDuringSchedulingIgnoredDuringExecution') || []
 check(worker_affinity.any? { |term| term['topologyKey']=='kubernetes.io/hostname' && term.dig('labelSelector','matchLabels','app.kubernetes.io/component')=='server' }, 'Authentik worker shares the server node so both can mount RWO media')

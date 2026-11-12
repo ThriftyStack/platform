@@ -119,8 +119,12 @@ authentik:
   server:
     replicas: 1
     # One RWO mount. Recreate releases the volume before the next pod starts.
+    # rollingUpdate: null is required. Omitting the field leaves a live
+    # rollingUpdate in place under server-side apply, and Recreate then fails
+    # admission.
     deploymentStrategy:
       type: Recreate
+      rollingUpdate: null
     securityContext:
       fsGroup: 1000
       fsGroupChangePolicy: OnRootMismatch
@@ -140,6 +144,7 @@ authentik:
     replicas: 1
     deploymentStrategy:
       type: Recreate
+      rollingUpdate: null
     securityContext:
       fsGroup: 1000
       fsGroupChangePolicy: OnRootMismatch

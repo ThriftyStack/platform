@@ -45,8 +45,10 @@ on the server and the worker through `global.volumes` and
 
 Longhorn RWO attaches to one node. The worker's required pod affinity follows
 the server pod onto that node, and server and worker use `Recreate` so a
-rollout drops the old pod before the new one mounts the volume. The backup
-pod uses the same affinity and mounts the claim read-only.
+rollout drops the old pod before the new one mounts the volume. Both
+strategies set `rollingUpdate: null`. Server-side apply keeps an omitted
+`rollingUpdate`, and a `Recreate` Deployment that still has one is rejected.
+The backup pod uses the same affinity and mounts the claim read-only.
 
 The chart's soft anti-affinity preset prefers a different node. The worker
 replaces that preset. With one replica of each, both pods and the backup pod
