@@ -53,7 +53,32 @@ external-secrets:
       metadata:
         name: oke-vault-listener-ca
         namespace: external-secrets
-        labels:
-          thriftystack.io/placeholder: vault-listener-ca
       data:
-        ca.crt: PLACEHOLDER_NOT_A_CERTIFICATE
+        # Same public chain as the authentik chart: E1, then self-signed R1.
+        # Not a private key. No SecretStore in this chart consumes it.
+        ca.crt: |
+          -----BEGIN CERTIFICATE-----
+          MIIB8DCCAXagAwIBAgIQJ3nJNbPRG2En3JnbsAQhBTAKBggqhkjOPQQDAzAdMRsw
+          GQYDVQQDExJEZXZPb3BzIFJvb3QgQ0EgUjEwHhcNMjYwOTA2MDg0MjU3WhcNMzEw
+          OTA1MDg0MjU3WjAyMRAwDgYDVQQKEwdEZXZPb3BzMR4wHAYDVQQDExVEZXZPb3Bz
+          IElzc3VpbmcgQ0EgRTEwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAQX573taRKiI1Vr
+          9yVh8gEgLrHOMbyUWp265GO9MnVvi6msq2P4wgxkAZJeKIO7SMbw7gcrjrJz2rez
+          UrwQhNm/EQOsps7sXK+JkMIig3gYaDJ/d9X21QFulUwiqelAMu6jZjBkMA4GA1Ud
+          DwEB/wQEAwIBBjASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTft0Te3d/V
+          JyWIcMDoZNdhlZX0HzAfBgNVHSMEGDAWgBTW0nFWNCRsvQjjlzzT7eJQ88q+TTAK
+          BggqhkjOPQQDAwNoADBlAjEAp5poEVjh75ICwF7d2X5x14EO6FgvtfgdvRUtYvfj
+          RqPz8nabFNDTWl27aCSCmvE9AjAHsEbHfWv17GMTMoniqOFMNZhkf7VMJWuiuwEW
+          Y8WBoocMmVn+8f1hB4xt+sheSa8=
+          -----END CERTIFICATE-----
+          -----BEGIN CERTIFICATE-----
+          MIIBujCCAUCgAwIBAgIQPl5G3RExNacC+Z/sm+PZgDAKBggqhkjOPQQDAzAdMRsw
+          GQYDVQQDExJEZXZPb3BzIFJvb3QgQ0EgUjEwHhcNMjYwOTA2MDgzNzUxWhcNMzYw
+          OTAzMDgzNzQ4WjAdMRswGQYDVQQDExJEZXZPb3BzIFJvb3QgQ0EgUjEwdjAQBgcq
+          hkjOPQIBBgUrgQQAIgNiAATfAKxC3JQLvm4xJGmLRZKwIfJIfbcxM3EjdS6DfKmv
+          GeRllk/ZogtDFhcfj5/Gascrztgk9hSOZ+qL93vCYkCttEZCYbslRZudCgBfmr+l
+          PfB3OLfrSaDiMnMnnX7nmQmjRTBDMA4GA1UdDwEB/wQEAwIBBjASBgNVHRMBAf8E
+          CDAGAQH/AgEBMB0GA1UdDgQWBBTW0nFWNCRsvQjjlzzT7eJQ88q+TTAKBggqhkjO
+          PQQDAwNoADBlAjBVlmoRizMI74E0/jxJxxb6aTOCgSzx/xQ77zFFXswHNR0Bkoz8
+          +S+2yBFW8EIv2wQCMQDgwoSdjo6oglO5fN6ffvOAnfeQrVaNJxawNrDYizhIPzHQ
+          XEPmrqCuJGfXTj3izCM=
+          -----END CERTIFICATE-----

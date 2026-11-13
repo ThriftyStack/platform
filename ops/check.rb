@@ -486,11 +486,13 @@ check(ctrl_args.none? { |arg| arg.include?('kube-system') }, 'leader election ar
 lead = eso.find { |o| o['kind'] == 'Role' && o.dig('metadata', 'name') == 'external-secrets-leaderelection' }
 check(lead && lead.dig('metadata', 'namespace') == 'external-secrets', 'leader election Role stays in external-secrets')
 check(lead.fetch('rules').any? { |rule| (rule['resources'] || []).include?('leases') }, 'leader election Role grants leases')
-placeholder = eso.find { |o| o['kind'] == 'ConfigMap' && o.dig('metadata', 'name') == 'oke-vault-listener-ca' }
-check(placeholder && placeholder.dig('metadata', 'namespace') == 'external-secrets', 'listener CA placeholder is named and namespaced')
-body = placeholder.dig('data', 'ca.crt').to_s
-check(body == 'PLACEHOLDER_NOT_A_CERTIFICATE', 'placeholder is exactly PLACEHOLDER_NOT_A_CERTIFICATE')
-check(eso.none? { |o| o['kind'] == 'Deployment' && o.to_json.include?('oke-vault-listener-ca') }, 'do not mount the placeholder')
+listener = eso.find { |o| o['kind'] == 'ConfigMap' && o.dig('metadata', 'name') == 'oke-vault-listener-ca' }
+check(listener && listener.dig('metadata', 'namespace') == 'external-secrets', 'OKE Vault listener CA is named and namespaced')
+check(!(listener.dig('metadata', 'labels') || {}).key?('thriftystack.io/placeholder'), 'OKE Vault listener CA has no placeholder label')
+body = listener.dig('data', 'ca.crt').to_s
+authentik_listener = listener_ca.dig('data', 'ca.crt').to_s
+check(body.include?('BEGIN CERTIFICATE') && !body.include?('PLACEHOLDER') && !body.include?('PRIVATE KEY') && body == authentik_listener, 'external-secrets listener CA is a public PEM, not PLACEHOLDER, no PRIVATE KEY, equals the authentik copy')
+check(eso.none? { |o| o['kind'] == 'Deployment' && o.to_json.include?('oke-vault-listener-ca') }, 'do not mount the listener CA')
 webhook_secret = eso.find { |o| o['kind'] == 'Secret' && o.dig('metadata', 'name') == 'external-secrets-webhook' }
 check(webhook_secret && webhook_secret['data'].nil?, 'webhook secret data belongs to certController')
 %w[external-secrets external-secrets-webhook external-secrets-cert-controller].each do |deploy_name|
