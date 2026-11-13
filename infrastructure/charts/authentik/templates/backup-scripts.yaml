@@ -33,10 +33,11 @@ data:
     echo "authentik backup: writing logical dump to /work/plain/authentik.dump" >&2
     pg_dump -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}" -Fc --file /work/plain/authentik.dump
     echo "authentik backup: archiving /data to /work/plain/data.tar.gz" >&2
-    set +e
-    tar --warning=no-file-changed -C /data -czf /work/plain/data.tar.gz .
-    status=$?
-    set -e
+    # tar exits 1 when a file changes during the read. That archive is still
+    # usable. Disabling errexit does not stop the ERR trap, so || keeps
+    # exit 1 from aborting the dump. Exit 2 and above is a real failure.
+    status=0
+    tar --warning=no-file-changed -C /data -czf /work/plain/data.tar.gz . || status=$?
     if [ "${status}" -gt 1 ]; then
       echo "authentik backup: tar of /data failed with status ${status}" >&2
       exit "${status}"

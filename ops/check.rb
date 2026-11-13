@@ -400,6 +400,7 @@ check(scripts, 'Authentik backup scripts ConfigMap is rendered')
 dump_script = scripts.dig('data','dump.sh').to_s
 check(dump_script.include?('age recipient is still the placeholder age1REPLACE_ME') && dump_script.index('age1REPLACE_ME') < dump_script.index('pg_dump'), 'Authentik backup rejects the placeholder age recipient before pg_dump')
 check(dump_script.include?('pg_dump') && dump_script.include?('-Fc'), 'Authentik backup uses pg_dump custom format')
+check(dump_script.include?('tar --warning=no-file-changed') && dump_script.include?('|| status=$?') && !dump_script.include?('set +e'), 'Authentik backup tolerates tar exit 1 without tripping the ERR trap')
 upload_script = scripts.dig('data','upload.sh').to_s
 check(upload_script.include?('COMPLETE') && !upload_script.match?(/s3\s+rm|s3api\s+delete|s3\s+rb|mc\s+rm/), 'Authentik backup uploads COMPLETE and does not delete bucket objects')
 check(upload_script.include?('ls -la /work/plain') && upload_script.include?('uploading '), 'Authentik upload names the missing file and the object it is uploading')
