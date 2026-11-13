@@ -28,6 +28,11 @@ spec:
           restartPolicy: OnFailure
           serviceAccountName: authentik-backup
           automountServiceAccountToken: false
+          # Images default to root. 1000 matches the media volume owner and the
+          # mode 0600 files these containers pass through /work. /tmp is an
+          # emptyDir because the root filesystem is read-only.
+          securityContext:
+            {{- include "thrifty-authentik.restrictedPod" . | nindent 12 }}
           # RWO media is already attached to the server node. Affinity puts this
           # pod there so the volume can mount read-only beside server and worker.
           affinity:
@@ -46,11 +51,7 @@ spec:
                 limits:
                   memory: 1Gi
               securityContext:
-                runAsUser: 1000
-                runAsGroup: 1000
-                allowPrivilegeEscalation: false
-                capabilities:
-                  drop: ["ALL"]
+                {{- include "thrifty-authentik.restrictedContainer" (dict "runAsUser" 1000 "runAsGroup" 1000) | nindent 16 }}
               volumeMounts:
                 - name: scripts
                   mountPath: /scripts
@@ -60,6 +61,8 @@ spec:
                 - name: media
                   mountPath: /data
                   readOnly: true
+                - name: tmp
+                  mountPath: /tmp
             {{- include "thrifty-authentik.ageEncrypt" (dict "root" . "file" "authentik.dump") | nindent 12 }}
             {{- include "thrifty-authentik.ageEncrypt" (dict "root" . "file" "data.tar.gz") | nindent 12 }}
             {{- include "thrifty-authentik.ageEncrypt" (dict "root" . "file" "manifest.env") | nindent 12 }}
@@ -68,7 +71,12 @@ spec:
               image: {{ .Values.backup.images.awsCli | quote }}
               imagePullPolicy: IfNotPresent
               command: ["/bin/bash", "/scripts/upload.sh"]
+              workingDir: /tmp
               env:
+                - name: HOME
+                  value: /tmp
+                - name: TMPDIR
+                  value: /tmp
                 - name: AGE_RECIPIENT
                   value: {{ .Values.backup.ageRecipient | quote }}
                 {{- include "thrifty-authentik.backupAwsEnv" . | nindent 16 }}
@@ -78,17 +86,23 @@ spec:
                   memory: 64Mi
                 limits:
                   memory: 256Mi
+              securityContext:
+                {{- include "thrifty-authentik.restrictedContainer" (dict "runAsUser" 1000 "runAsGroup" 1000) | nindent 16 }}
               volumeMounts:
                 - name: scripts
                   mountPath: /scripts
                   readOnly: true
                 - name: work
                   mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
           volumes:
             - name: scripts
               configMap:
                 name: authentik-backup-scripts
             - name: work
+              emptyDir: {}
+            - name: tmp
               emptyDir: {}
             - name: media
               persistentVolumeClaim:

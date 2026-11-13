@@ -6,3 +6,7 @@
 
 .evidence/
 __pycache__/
+
+# Unpacked Helm charts. Helm prefers charts/<name>/ over the locked *.tgz,
+# so an unpack hides the archive pin. The tarballs stay tracked.
+infrastructure/charts/*/charts/*/

@@ -21,6 +21,14 @@ end
 def check(value, message)
   raise message unless value
 end
+def authentik_restricted_container?(container, uid)
+  context = container['securityContext'] || {}
+  tmp = (container['volumeMounts'] || []).find { |mount| mount['mountPath']=='/tmp' }
+  context['runAsNonRoot']==true && context['runAsUser']==uid && context['runAsGroup']==uid &&
+    context['allowPrivilegeEscalation']==false && context['readOnlyRootFilesystem']==true &&
+    context.dig('seccompProfile','type')=='RuntimeDefault' && context.dig('capabilities','drop')==['ALL'] &&
+    (context.dig('capabilities','add') || []).empty? && tmp && tmp['name']=='tmp' && tmp['readOnly']!=true
+end
 def documents(text)
   text.split(/^---\s*$/).reject { |s| s.strip.empty? }.map { |s| YAML.safe_load(s, permitted_classes: [Time], aliases: true) }.compact
 end
@@ -339,7 +347,7 @@ authentik_runtime = rendered.fetch('authentik')
 check(authentik_runtime.any? { |o| o['kind']=='Service' && o.dig('spec','type')=='NodePort' && (o.dig('spec','ports')||[]).any? { |p| p['nodePort']==30080 } }, 'Authentik server exposes HTTP NodePort 30080 for the Cloudflare tunnel')
 authentik_values = YAML.safe_load(File.read("#{ROOT}/infrastructure/charts/authentik/values.yaml"))
 media = authentik_runtime.find { |o| o['kind']=='PersistentVolumeClaim' && o.dig('metadata','name')==authentik_values.dig('media','claimName') }
-check(media && media.dig('spec','storageClassName')=='longhorn' && media.dig('spec','accessModes')==['ReadWriteOnce'] && media.dig('spec','resources','requests','storage')=='10Gi', 'Authentik media PVC is Longhorn RWO 10Gi')
+check(media && media.dig('spec','storageClassName')=='longhorn' && media.dig('spec','accessModes')==['ReadWriteOnce'] && media.dig('spec','resources','requests','storage')=='1Gi', 'Authentik media PVC is Longhorn RWO 1Gi')
 def authentik_mounts_data?(object)
   containers = object.dig('spec','template','spec','containers') || []
   containers.any? { |container| (container['volumeMounts'] || []).any? { |mount| mount['name']=='data' && mount['mountPath']=='/data' } }
@@ -350,7 +358,12 @@ check(authentik_mounts_data?(authentik_server) && authentik_mounts_data?(authent
 server_claim = (authentik_server.dig('spec','template','spec','volumes') || []).find { |volume| volume['name']=='data' }
 worker_claim = (authentik_worker.dig('spec','template','spec','volumes') || []).find { |volume| volume['name']=='data' }
 check(server_claim&.dig('persistentVolumeClaim','claimName')==authentik_values.dig('media','claimName') && worker_claim&.dig('persistentVolumeClaim','claimName')==authentik_values.dig('media','claimName'), 'Authentik server and worker mount the wrapper media PVC')
-check(authentik_server.dig('spec','strategy','type')=='Recreate' && authentik_worker.dig('spec','strategy','type')=='Recreate', 'Authentik media rollout uses Recreate so the RWO volume is released')
+[authentik_server, authentik_worker].each do |deploy|
+  strategy = deploy.dig('spec','strategy') || {}
+  sync_options = deploy.dig('metadata','annotations','argocd.argoproj.io/sync-options').to_s.split(',').map(&:strip)
+  check(strategy['type']=='Recreate' && !strategy.key?('rollingUpdate'), "#{deploy.dig('metadata','name')} uses Recreate with no rollingUpdate")
+  check(sync_options.include?('Replace=true') && sync_options.include?('ServerSideApply=false'), "#{deploy.dig('metadata','name')} is replaced so a live rollingUpdate is cleared")
+end
 check(authentik_server.dig('spec','template','spec','securityContext','fsGroup')==1000 && authentik_worker.dig('spec','template','spec','securityContext','fsGroup')==1000, 'Authentik media volume is writable by uid 1000')
 worker_affinity = authentik_worker.dig('spec','template','spec','affinity','podAffinity','requiredDuringSchedulingIgnoredDuringExecution') || []
 check(worker_affinity.any? { |term| term['topologyKey']=='kubernetes.io/hostname' && term.dig('labelSelector','matchLabels','app.kubernetes.io/component')=='server' }, 'Authentik worker shares the server node so both can mount RWO media')
@@ -410,6 +423,24 @@ restore_pod = restore_job.dig('spec','jobTemplate','spec','template','spec')
 postgres_sidecar = (restore_pod['initContainers'] || []).find { |container| container['name']=='postgres' }
 check(postgres_sidecar && postgres_sidecar['restartPolicy']=='Always', 'Throwaway Postgres is a native sidecar so the restore Job can complete')
 check((restore_pod['containers'] || []).map { |container| container['name'] }==['restore'], 'Restore test has one app container so Job success follows restore.sh')
+[backup_pod, restore_pod].each do |pod|
+  context = pod['securityContext'] || {}
+  check(context['runAsNonRoot']==true && context['runAsUser']==1000 && context['runAsGroup']==1000 && context['fsGroup']==1000 && context.dig('seccompProfile','type')=='RuntimeDefault', 'Authentik backup pods run as uid 1000 under restricted PodSecurity')
+  tmp_volume = (pod['volumes'] || []).find { |volume| volume['name']=='tmp' }
+  check(tmp_volume && tmp_volume['emptyDir'], 'Authentik backup pods give containers a writable emptyDir at /tmp')
+  containers = (pod['initContainers'] || []) + (pod['containers'] || [])
+  containers.each do |container|
+    uid = container['name']=='postgres' ? 999 : 1000
+    check(authentik_restricted_container?(container, uid), "Authentik #{container['name']} meets restricted PodSecurity as uid #{uid}")
+  end
+end
+postgres_data = (postgres_sidecar['volumeMounts'] || []).find { |mount| mount['mountPath']=='/var/lib/postgresql/data' }
+postgres_socket = (postgres_sidecar['volumeMounts'] || []).find { |mount| mount['mountPath']=='/var/run/postgresql' }
+check(postgres_data && postgres_data['name']=='pgdata' && postgres_socket && postgres_socket['name']=='pgrun', 'Throwaway Postgres keeps writable data and socket directories')
+%w[pgdata pgrun].each do |name|
+  volume = (restore_pod['volumes'] || []).find { |item| item['name']==name }
+  check(volume && volume['emptyDir'], "Throwaway Postgres #{name} is an emptyDir")
+end
 restore_script = scripts.dig('data','restore.sh').to_s
 check(restore_script.include?('pg_restore') && restore_script.include?('authentik_core_user'), 'Authentik restore-test restores into throwaway Postgres and counts authentik_core_user')
 # Namespace admission, CSR address and storage policy selectors must still match actual dependency names.

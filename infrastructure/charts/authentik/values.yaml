@@ -8,7 +8,7 @@
 # (files live under /data/media). The claim name matches the volume below.
 media:
   claimName: authentik-data
-  size: 10Gi
+  size: 1Gi
   storageClass: longhorn
 
 # Nightly logical backup. Enabled for the management release. The job exits
@@ -119,8 +119,12 @@ authentik:
   server:
     replicas: 1
     # One RWO mount. Recreate releases the volume before the next pod starts.
+    # The upstream helper omits rollingUpdate. Server-side apply would keep a
+    # live value, and Recreate then fails admission. Replace writes this spec.
     deploymentStrategy:
       type: Recreate
+    deploymentAnnotations:
+      argocd.argoproj.io/sync-options: Replace=true,ServerSideApply=false
     securityContext:
       fsGroup: 1000
       fsGroupChangePolicy: OnRootMismatch
@@ -140,6 +144,8 @@ authentik:
     replicas: 1
     deploymentStrategy:
       type: Recreate
+    deploymentAnnotations:
+      argocd.argoproj.io/sync-options: Replace=true,ServerSideApply=false
     securityContext:
       fsGroup: 1000
       fsGroupChangePolicy: OnRootMismatch

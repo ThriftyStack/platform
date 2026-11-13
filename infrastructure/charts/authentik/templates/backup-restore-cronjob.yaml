@@ -29,12 +29,21 @@ spec:
           restartPolicy: Never
           serviceAccountName: authentik-backup
           automountServiceAccountToken: false
+          # Same restricted pod as the backup Job. The Postgres sidecar overrides
+          # to uid 999, the user that image's entrypoint and initdb expect.
+          securityContext:
+            {{- include "thrifty-authentik.restrictedPod" . | nindent 12 }}
           initContainers:
             - name: fetch
               image: {{ .Values.backup.images.awsCli | quote }}
               imagePullPolicy: IfNotPresent
               command: ["/bin/bash", "/scripts/fetch.sh"]
+              workingDir: /tmp
               env:
+                - name: HOME
+                  value: /tmp
+                - name: TMPDIR
+                  value: /tmp
                 {{- include "thrifty-authentik.backupAwsEnv" . | nindent 16 }}
               resources:
                 requests:
@@ -42,12 +51,16 @@ spec:
                   memory: 64Mi
                 limits:
                   memory: 512Mi
+              securityContext:
+                {{- include "thrifty-authentik.restrictedContainer" (dict "runAsUser" 1000 "runAsGroup" 1000) | nindent 16 }}
               volumeMounts:
                 - name: scripts
                   mountPath: /scripts
                   readOnly: true
                 - name: work
                   mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
             - name: decrypt
               image: {{ .Values.backup.images.age | quote }}
               imagePullPolicy: IfNotPresent
@@ -65,12 +78,16 @@ spec:
                   memory: 32Mi
                 limits:
                   memory: 256Mi
+              securityContext:
+                {{- include "thrifty-authentik.restrictedContainer" (dict "runAsUser" 1000 "runAsGroup" 1000) | nindent 16 }}
               volumeMounts:
                 - name: work
                   mountPath: /work
                 - name: identity
                   mountPath: /identity
                   readOnly: true
+                - name: tmp
+                  mountPath: /tmp
             # Native sidecar: stays up while restore runs, then the kubelet
             # stops it when restore exits so the Job can succeed.
             - name: postgres
@@ -97,9 +114,15 @@ spec:
                   memory: 128Mi
                 limits:
                   memory: 1Gi
+              securityContext:
+                {{- include "thrifty-authentik.restrictedContainer" (dict "runAsUser" 999 "runAsGroup" 999) | nindent 16 }}
               volumeMounts:
                 - name: pgdata
                   mountPath: /var/lib/postgresql/data
+                - name: pgrun
+                  mountPath: /var/run/postgresql
+                - name: tmp
+                  mountPath: /tmp
           containers:
             - name: restore
               image: {{ .Values.backup.images.postgres | quote }}
@@ -109,10 +132,7 @@ spec:
                 - name: PGPASSWORD
                   value: restore-test
               securityContext:
-                runAsUser: 0
-                allowPrivilegeEscalation: false
-                capabilities:
-                  drop: ["ALL"]
+                {{- include "thrifty-authentik.restrictedContainer" (dict "runAsUser" 1000 "runAsGroup" 1000) | nindent 16 }}
               resources:
                 requests:
                   cpu: 50m
@@ -125,13 +145,19 @@ spec:
                   readOnly: true
                 - name: work
                   mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
           volumes:
             - name: scripts
               configMap:
                 name: authentik-backup-scripts
             - name: work
               emptyDir: {}
+            - name: tmp
+              emptyDir: {}
             - name: pgdata
+              emptyDir: {}
+            - name: pgrun
               emptyDir: {}
             - name: identity
               secret:

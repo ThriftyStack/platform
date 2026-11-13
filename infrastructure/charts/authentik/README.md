@@ -38,15 +38,26 @@ The backup reads that Secret by name. It uses `AUTHENTIK_POSTGRESQL__HOST`,
 
 ## Media
 
-`authentik-data` is a 10Gi Longhorn PVC, `ReadWriteOnce`, mounted at `/data`
+`authentik-data` is a 1Gi Longhorn PVC, `ReadWriteOnce`, mounted at `/data`
 on the server and the worker through `global.volumes` and
 `global.volumeMounts`. The container user is uid 1000, so both pods set
 `fsGroup: 1000`.
 
+Kubernetes cannot shrink a bound claim. After this size change is merged,
+delete the empty claim and let Argo recreate it:
+
+```sh
+kubectl -n authentik delete pvc authentik-data
+```
+
 Longhorn RWO attaches to one node. The worker's required pod affinity follows
 the server pod onto that node, and server and worker use `Recreate` so a
-rollout drops the old pod before the new one mounts the volume. The backup
-pod uses the same affinity and mounts the claim read-only.
+rollout drops the old pod before the new one mounts the volume. The upstream
+helper renders `type: Recreate` and omits `rollingUpdate`. Server-side apply
+would keep a live `rollingUpdate`, which admission rejects. Both Deployments
+sync with `Replace=true` and `ServerSideApply=false`, so Argo writes the
+rendered spec and drops that field. The backup pod uses the same affinity
+and mounts the claim read-only.
 
 The chart's soft anti-affinity preset prefers a different node. The worker
 replaces that preset. With one replica of each, both pods and the backup pod
@@ -60,6 +71,21 @@ must land on the server pod's node.
 `backup.ageRecipient` is the offline age public key. The dump container
 still exits before `pg_dump` if that value is put back to `age1REPLACE_ME`.
 The private identity stays off the cluster except during a restore test.
+
+Backup and restore-test pods meet the restricted Pod Security profile, including
+a Job created from either CronJob. The pod runs as uid/gid 1000 with `fsGroup:
+1000`, `runAsNonRoot`, and `seccompProfile: RuntimeDefault`. Every container
+sets `allowPrivilegeEscalation: false`, drops all capabilities, and uses a
+read-only root filesystem with an emptyDir at `/tmp`.
+
+`postgres:17.10-bookworm`, `jauderho/age:v1.3.2`, and `amazon/aws-cli:2.39.3`
+ship with no `USER`, so they start as root unless the pod sets one. `pg_dump`,
+`pg_restore`, and the AWS CLI are world-executable and run as uid 1000, which
+is the media volume owner and the owner of the mode 0600 files on `/work`.
+The age binary is mode 0755 and uses that same uid so it can read those files.
+The AWS containers set `HOME` and `TMPDIR` to `/tmp`. The throwaway Postgres
+sidecar overrides to uid/gid 999, the `postgres` user in that image, and mounts
+emptyDirs on its data directory and `/var/run/postgresql`.
 
 Each successful run uploads one prefix:
 
