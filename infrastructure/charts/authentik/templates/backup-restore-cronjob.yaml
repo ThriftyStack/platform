@@ -61,6 +61,7 @@ spec:
                   mountPath: /work
                 - name: tmp
                   mountPath: /tmp
+                {{- include "thrifty-authentik.minioCaMount" . | nindent 16 }}
             - name: decrypt
               image: {{ .Values.backup.images.age | quote }}
               imagePullPolicy: IfNotPresent
@@ -162,4 +163,5 @@ spec:
             - name: identity
               secret:
                 secretName: {{ .Values.backup.restoreTest.ageIdentitySecret }}
+            {{- include "thrifty-authentik.minioCaVolume" . | nindent 12 }}
 {{- end }}

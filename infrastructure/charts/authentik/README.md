@@ -72,6 +72,18 @@ must land on the server pod's node.
 still exits before `pg_dump` if that value is put back to `age1REPLACE_ME`.
 The private identity stays off the cluster except during a restore test.
 
+The backup Job uses `restartPolicy: Never` and keeps three failed Jobs.
+`ttlSecondsAfterFinished` is 86400, so a finished Job's pods stay for a day.
+`OnFailure` would leave the pod Running while the container restarts.
+Kubernetes 1.36 adds those restarts up (`pastBackoffLimitOnFailure`) and, on
+`BackoffLimitExceeded`, deletes that still-active pod. `activeDeadlineSeconds`
+only fails the Job after an hour, with reason `DeadlineExceeded`.
+
+Dump, upload, fetch, and restore print the failing check and a step marker
+to stderr. A missing upload object also runs `ls -la /work/plain`. The age
+image has no shell, so the encrypt containers are the `age` binary and its
+own stderr.
+
 Backup and restore-test pods meet the restricted Pod Security profile, including
 a Job created from either CronJob. The pod runs as uid/gid 1000 with `fsGroup:
 1000`, `runAsNonRoot`, and `seccompProfile: RuntimeDefault`. Every container
@@ -83,9 +95,11 @@ ship with no `USER`, so they start as root unless the pod sets one. `pg_dump`,
 `pg_restore`, and the AWS CLI are world-executable and run as uid 1000, which
 is the media volume owner and the owner of the mode 0600 files on `/work`.
 The age binary is mode 0755 and uses that same uid so it can read those files.
-The AWS containers set `HOME` and `TMPDIR` to `/tmp`. The throwaway Postgres
-sidecar overrides to uid/gid 999, the `postgres` user in that image, and mounts
-emptyDirs on its data directory and `/var/run/postgresql`.
+The AWS containers set `HOME` and `TMPDIR` to `/tmp`, so the CLI cache is
+`/tmp/.aws/cli/cache` on the emptyDir rather than a read-only home. The
+throwaway Postgres sidecar overrides to uid/gid 999, the `postgres` user in
+that image, and mounts emptyDirs on its data directory and
+`/var/run/postgresql`.
 
 Each successful run uploads one prefix:
 
@@ -138,7 +152,10 @@ R1 and expires 2031-09-05. R1 is self-signed and expires 2036-09-03. The
 render check rejects `PLACEHOLDER`, a private key, a non-PEM, or any chain
 whose subjects are not those two names. `vault.devoops.uk` presents a leaf
 for `CN=vault.internal` issued by E1, so this bundle is what the store uses
-to verify that leaf.
+to verify that leaf. `https://s3.adminio.biz:9000` presents
+`CN=s3.adminio.biz`, issued by E1. The upload and fetch containers mount
+this ConfigMap read-only at `/etc/ssl/minio-ca` and set `AWS_CA_BUNDLE` to
+`ca.crt`. TLS verification stays on.
 
 Images are pinned: `postgres:17.10-bookworm` (same tag as the bundled
 database), `jauderho/age:v1.3.2` (upstream age publishes no image; the binary

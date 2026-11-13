@@ -61,6 +61,20 @@ podAffinity:
   value: {{ .Values.backup.minio.bucket | quote }}
 - name: PREFIX
   value: {{ .Values.backup.minio.prefix | quote }}
+- name: AWS_CA_BUNDLE
+  value: {{ printf "/etc/ssl/minio-ca/%s" .Values.backup.minio.listenerCaKey | quote }}
+{{- end }}
+
+{{- define "thrifty-authentik.minioCaVolume" -}}
+- name: listener-ca
+  configMap:
+    name: {{ .Values.backup.minio.listenerCaConfigMap }}
+{{- end }}
+
+{{- define "thrifty-authentik.minioCaMount" -}}
+- name: listener-ca
+  mountPath: /etc/ssl/minio-ca
+  readOnly: true
 {{- end }}
 
 {{- define "thrifty-authentik.restrictedPod" -}}
