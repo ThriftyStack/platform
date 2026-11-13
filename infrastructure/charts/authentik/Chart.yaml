@@ -3,7 +3,7 @@ apiVersion: v2
 name: thrifty-authentik
 description: Authentik identity provider runtime on the management cluster
 type: application
-version: 0.2.2
+version: 0.2.3
 appVersion: "2026.5.6"
 dependencies:
 - name: authentik

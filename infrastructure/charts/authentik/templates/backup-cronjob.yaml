@@ -17,6 +17,8 @@ spec:
     spec:
       backoffLimit: 2
       activeDeadlineSeconds: 3600
+      # Finished Jobs and their pods remain for a day. This does not delete the
+      # pod at BackoffLimitExceeded.
       ttlSecondsAfterFinished: 86400
       template:
         metadata:
@@ -25,7 +27,11 @@ spec:
             app.kubernetes.io/instance: {{ .Release.Name }}
             app.kubernetes.io/component: backup
         spec:
-          restartPolicy: OnFailure
+          # OnFailure keeps the pod Running while the kubelet restarts the
+          # container. Kubernetes 1.36 counts those restarts toward backoffLimit
+          # and then deletes that still-active pod, so the logs disappear.
+          # Never leaves the failed pod until the 24h TTL.
+          restartPolicy: Never
           serviceAccountName: authentik-backup
           automountServiceAccountToken: false
           # Images default to root. 1000 matches the media volume owner and the
@@ -96,6 +102,7 @@ spec:
                   mountPath: /work
                 - name: tmp
                   mountPath: /tmp
+                {{- include "thrifty-authentik.minioCaMount" . | nindent 16 }}
           volumes:
             - name: scripts
               configMap:
@@ -108,4 +115,5 @@ spec:
               persistentVolumeClaim:
                 claimName: {{ .Values.media.claimName }}
                 readOnly: true
+            {{- include "thrifty-authentik.minioCaVolume" . | nindent 12 }}
 {{- end }}

@@ -29,6 +29,20 @@ def authentik_restricted_container?(container, uid)
     context.dig('seccompProfile','type')=='RuntimeDefault' && context.dig('capabilities','drop')==['ALL'] &&
     (context.dig('capabilities','add') || []).empty? && tmp && tmp['name']=='tmp' && tmp['readOnly']!=true
 end
+def authentik_minio_tls?(pod, container_name, values)
+  container = ((pod['initContainers'] || []) + (pod['containers'] || [])).find { |item| item['name']==container_name }
+  return false unless container
+  key = values.dig('backup','minio','listenerCaKey')
+  bundle = (container['env'] || []).find { |env| env['name']=='AWS_CA_BUNDLE' }
+  endpoint = (container['env'] || []).find { |env| env['name']=='ENDPOINT' }
+  mount = (container['volumeMounts'] || []).find { |item| item['name']=='listener-ca' }
+  volume = (pod['volumes'] || []).find { |item| item['name']=='listener-ca' }
+  path = "/etc/ssl/minio-ca/#{key}"
+  bundle && bundle['value']==path &&
+    endpoint && endpoint['value']==values.dig('backup','minio','endpoint') &&
+    mount && mount['mountPath']=='/etc/ssl/minio-ca' && mount['readOnly']==true &&
+    volume && volume.dig('configMap','name')==values.dig('backup','minio','listenerCaConfigMap')
+end
 def documents(text)
   text.split(/^---\s*$/).reject { |s| s.strip.empty? }.map { |s| YAML.safe_load(s, permitted_classes: [Time], aliases: true) }.compact
 end
@@ -369,6 +383,8 @@ worker_affinity = authentik_worker.dig('spec','template','spec','affinity','podA
 check(worker_affinity.any? { |term| term['topologyKey']=='kubernetes.io/hostname' && term.dig('labelSelector','matchLabels','app.kubernetes.io/component')=='server' }, 'Authentik worker shares the server node so both can mount RWO media')
 backup_job = authentik_runtime.find { |o| o['kind']=='CronJob' && o.dig('metadata','name')=='authentik-backup' }
 check(backup_job && backup_job.dig('spec','schedule')=='15 3 * * *' && backup_job.dig('spec','suspend')!=true && backup_job.dig('spec','concurrencyPolicy')=='Forbid', 'Authentik backup CronJob is a nightly exclusive run')
+check(backup_job.dig('spec','failedJobsHistoryLimit').to_i >= 3, 'Authentik backup keeps at least three failed Jobs')
+check(backup_job.dig('spec','jobTemplate','spec','template','spec','restartPolicy')=='Never', 'Authentik backup Job does not restart a failed container in the same pod')
 backup_pod = backup_job.dig('spec','jobTemplate','spec','template','spec')
 backup_affinity = backup_pod.dig('affinity','podAffinity','requiredDuringSchedulingIgnoredDuringExecution') || []
 check(backup_affinity.any? { |term| term['topologyKey']=='kubernetes.io/hostname' && term.dig('labelSelector','matchLabels','app.kubernetes.io/component')=='server' }, 'Authentik backup pod is pinned to the server node for the RWO media volume')
@@ -386,6 +402,13 @@ check(dump_script.include?('age recipient is still the placeholder age1REPLACE_M
 check(dump_script.include?('pg_dump') && dump_script.include?('-Fc'), 'Authentik backup uses pg_dump custom format')
 upload_script = scripts.dig('data','upload.sh').to_s
 check(upload_script.include?('COMPLETE') && !upload_script.match?(/s3\s+rm|s3api\s+delete|s3\s+rb|mc\s+rm/), 'Authentik backup uploads COMPLETE and does not delete bucket objects')
+check(upload_script.include?('ls -la /work/plain') && upload_script.include?('uploading '), 'Authentik upload names the missing file and the object it is uploading')
+check(!upload_script.include?('no-verify-ssl') && !upload_script.include?('no-verify'), 'Authentik upload keeps TLS verification on')
+fetch_script = scripts.dig('data','fetch.sh').to_s
+check(fetch_script.include?('ls -la /work/enc') && fetch_script.include?('downloading '), 'Authentik fetch names a missing download before it exits')
+check(!fetch_script.include?('no-verify-ssl') && !fetch_script.include?('no-verify'), 'Authentik fetch keeps TLS verification on')
+restore_script_body = scripts.dig('data','restore.sh').to_s
+check(restore_script_body.include?('ls -la /work/plain') && restore_script_body.include?('restoring '), 'Authentik restore names a missing dump before pg_restore')
 check(authentik_runtime.none? { |o| o['kind']=='Secret' && o.dig('metadata','name')==authentik_values.dig('backup','minio','secretName') }, 'Authentik MinIO credentials are not rendered as a Secret')
 external_secret = authentik_runtime.find { |o| o['kind']=='ExternalSecret' && o.dig('metadata','name')==authentik_values.dig('backup','minio','secretName') }
 check(external_secret && external_secret.dig('spec','secretStoreRef','name')=='oke-vault' && external_secret.dig('spec','secretStoreRef','kind')=='SecretStore', 'Authentik backup MinIO ExternalSecret uses the namespaced SecretStore')
@@ -420,6 +443,9 @@ check(authentik_values.dig('backup','ageRecipient')!='age1REPLACE_ME', 'Authenti
 restore_job = authentik_runtime.find { |o| o['kind']=='CronJob' && o.dig('metadata','name')=='authentik-backup-restore-test' }
 check(restore_job && restore_job.dig('spec','suspend')==true, 'Authentik restore-test CronJob is suspended')
 restore_pod = restore_job.dig('spec','jobTemplate','spec','template','spec')
+check(authentik_values.dig('backup','minio','endpoint')=='https://s3.adminio.biz:9000', 'Authentik MinIO endpoint stays https://s3.adminio.biz:9000')
+check(authentik_minio_tls?(backup_pod, 'upload', authentik_values), 'Authentik upload sets AWS_CA_BUNDLE and mounts the listener CA read-only')
+check(authentik_minio_tls?(restore_pod, 'fetch', authentik_values), 'Authentik fetch sets AWS_CA_BUNDLE and mounts the listener CA read-only')
 postgres_sidecar = (restore_pod['initContainers'] || []).find { |container| container['name']=='postgres' }
 check(postgres_sidecar && postgres_sidecar['restartPolicy']=='Always', 'Throwaway Postgres is a native sidecar so the restore Job can complete')
 check((restore_pod['containers'] || []).map { |container| container['name'] }==['restore'], 'Restore test has one app container so Job success follows restore.sh')
