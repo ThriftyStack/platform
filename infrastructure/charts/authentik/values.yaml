@@ -118,6 +118,8 @@ authentik:
       port: 5432
   server:
     replicas: 1
+    metrics:
+      enabled: true
     # One RWO mount. Recreate releases the volume before the next pod starts.
     # The upstream helper omits rollingUpdate. Server-side apply would keep a
     # live value, and Recreate then fails admission. Replace writes this spec.
@@ -142,6 +144,8 @@ authentik:
         memory: 1Gi
   worker:
     replicas: 1
+    metrics:
+      enabled: true
     deploymentStrategy:
       type: Recreate
     deploymentAnnotations:
