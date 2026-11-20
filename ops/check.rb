@@ -299,8 +299,21 @@ istiod = rendered.fetch('istiod').find { |o| o['kind']=='Deployment' }
 env = istiod.dig('spec','template','spec','containers')[0]['env']
 check(env.any? { |e| e['name']=='ENABLE_CA_SERVER' && e['value']=='false' }, 'Istiod internal CA must be disabled')
 check(istiod.dig('spec','template','spec','volumes').any? { |v| v.dig('secret','secretName')=='istiod-tls' }, 'Istiod must consume istio-csr control-plane certificate')
-issuer = configuration('vault-issuer').find { |o| o['kind']=='Issuer' }
-check(issuer.dig('spec','vault','path')=='pki-management/sign/istio' && issuer.dig('spec','vault','auth','kubernetes','serviceAccountRef','name')=='istio-vault-auth', 'Signer uses constrained intermediate and short-lived SA auth')
+issuer_objects = configuration('vault-issuer')
+issuer = issuer_objects.find { |o| o['kind']=='Issuer' }
+vault_spec = issuer.fetch('spec').fetch('vault')
+auth = vault_spec.dig('auth','kubernetes')
+check(vault_spec['server']=='https://vault.devoops.uk', 'Management mesh issuer targets the estate Vault')
+check(vault_spec['path']=='pki_mesh_mgmt/sign/mesh', 'Management mesh issuer signs on the mesh-mgmt role')
+check(vault_spec['caBundleSecretRef']=={'name'=>'oke-vault-listener-ca','key'=>'ca.crt'}, 'Management mesh issuer trusts the estate listener chain')
+check(auth['mountPath']=='/v1/auth/jwt-management', 'Management mesh issuer logs in through the JWT mount')
+check(auth['role']=='istio-system_istio-vault-auth', 'Management mesh issuer uses the istio JWT role')
+check(auth.dig('serviceAccountRef','name')=='istio-vault-auth', 'Management mesh issuer still mints the istio-vault-auth token')
+check(auth.dig('serviceAccountRef','audiences')==['vault://istio-system/vault-istio'], 'Management mesh issuer keeps the vault-istio audience')
+check(auth['secretRef'].nil?, 'Management mesh issuer must not use a stored Vault token')
+listener_secret = issuer_objects.find { |o| o['kind']=='Secret' && o.dig('metadata','name')=='oke-vault-listener-ca' }
+check(listener_secret && listener_secret.dig('metadata','namespace')=='istio-system' && listener_secret['type']=='Opaque', 'Listener CA secret is rendered beside the Issuer')
+check(!listener_secret.dig('stringData','ca.crt').to_s.include?('PRIVATE KEY'), 'Listener CA secret holds no private key')
 root_cm = configuration('mesh-prerequisites').find { |o| o['kind']=='ConfigMap' && o.dig('metadata','name')=='istio-root-ca' }
 check(root_cm.dig('metadata','namespace')=='cert-manager' && root_cm.dig('metadata','annotations','argocd.argoproj.io/sync-options')=='Prune=false,Delete=false', 'istio-root-ca stays in cert-manager and is not pruned')
 root_pem = root_cm.dig('data','ca.pem').to_s
@@ -371,6 +384,15 @@ remote_apps.each do |a|
   if a.dig('metadata','name')=='oci-cert-manager-istio-csr'
     c=objects.find { |o| o['kind']=='Certificate' }
     check(c.dig('spec','uris')==['spiffe://oci.thriftystack.internal/ns/istio-system/sa/istiod-service-account'], 'OCI must never use management SPIFFE identities')
+  end
+  if a.dig('metadata','name')=='oci-vault-issuer'
+    remote_issuer = objects.find { |o| o['kind']=='Issuer' }
+    remote_vault = remote_issuer.fetch('spec').fetch('vault')
+    check(remote_vault['path']=='pki-oci/sign/istio', 'OCI issuer stays on the spoke mount')
+    check(remote_vault.dig('auth','kubernetes','mountPath')=='/v1/auth/kubernetes-oci', 'OCI issuer stays on Kubernetes auth')
+    check(remote_vault.dig('auth','kubernetes','role')=='oci-istio-signer', 'OCI issuer stays on the spoke signer role')
+    check(remote_vault.dig('caBundleSecretRef','name')=='vault-bootstrap-ca', 'OCI issuer keeps the spoke bootstrap CA')
+    check(objects.none? { |o| o['kind']=='Secret' && o.dig('metadata','name')=='oke-vault-listener-ca' }, 'OCI issuer does not mount the estate listener CA')
   end
 end
 remote_declaration=render(HELM,'template','management',CHART,*cluster_profile('management'),'--set','stages.pki=true','--set','pkiClusters={oci}').find { |o| o['kind']=='Application' && o.dig('metadata','name')=='oci-vault-pki' }
@@ -532,6 +554,7 @@ check(!(listener.dig('metadata', 'labels') || {}).key?('thriftystack.io/placehol
 body = listener.dig('data', 'ca.crt').to_s
 authentik_listener = listener_ca.dig('data', 'ca.crt').to_s
 check(body.include?('BEGIN CERTIFICATE') && !body.include?('PLACEHOLDER') && !body.include?('PRIVATE KEY') && body == authentik_listener, 'external-secrets listener CA is a public PEM, not PLACEHOLDER, no PRIVATE KEY, equals the authentik copy')
+check(listener_secret.dig('stringData','ca.crt')==body, 'Issuer listener CA equals the external-secrets oke-vault-listener-ca bundle')
 check(eso.none? { |o| o['kind'] == 'Deployment' && o.to_json.include?('oke-vault-listener-ca') }, 'do not mount the listener CA')
 webhook_secret = eso.find { |o| o['kind'] == 'Secret' && o.dig('metadata', 'name') == 'external-secrets-webhook' }
 check(webhook_secret && webhook_secret['data'].nil?, 'webhook secret data belongs to certController')
