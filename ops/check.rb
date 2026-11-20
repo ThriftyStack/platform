@@ -138,18 +138,31 @@ check(allow.include?(['pkg.crossplane.io', 'Provider']), 'Provider packages are 
 check(allow.include?(['pkg.crossplane.io', 'DeploymentRuntimeConfig']), 'Provider runtimes are cluster-scoped')
 def fetch(url)
   uri = URI(url)
-  http = Net::HTTP.new(uri.host, uri.port)
-  http.use_ssl = uri.scheme == 'https'
-  http.open_timeout = 20
-  http.read_timeout = 30
-  request = Net::HTTP::Get.new(uri)
-  request['User-Agent'] = 'thrifty-platform-fetch'
-  request['Accept'] = 'application/vnd.github+json'
   token = ENV['GITHUB_TOKEN'] || ENV['GH_TOKEN']
-  request['Authorization'] = "Bearer #{token}" if token && !token.empty?
-  response = http.request(request)
-  raise "GET #{url} failed: #{response.code}" unless response.is_a?(Net::HTTPSuccess)
-  response.body
+  delays = [2, 4, 8, 16]
+  attempt = 0
+  loop do
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == 'https'
+    http.open_timeout = 20
+    http.read_timeout = 30
+    request = Net::HTTP::Get.new(uri)
+    request['User-Agent'] = 'thrifty-platform-fetch'
+    request['Accept'] = 'application/vnd.github+json'
+    request['Authorization'] = "Bearer #{token}" if token && !token.empty?
+    response = http.request(request)
+    return response.body if response.is_a?(Net::HTTPSuccess)
+    retryable = %w[403 429 500 502 503 504].include?(response.code)
+    if retryable && attempt < delays.length
+      wait = response['retry-after'].to_i
+      wait = delays[attempt] if wait <= 0 || wait > 30
+      attempt += 1
+      sleep wait
+      next
+    end
+    detail = response.body.to_s.gsub(/\s+/, ' ')[0, 180]
+    raise "GET #{url} failed: #{response.code} #{detail}"
+  end
 end
 authentik_docs = JSON.parse(fetch('https://api.github.com/repos/ThriftyStack/crossplane/contents/deploy/authentik?ref=main')).select { |entry| entry['name'].end_with?('.yaml') }.flat_map do |entry|
   documents(fetch(entry['download_url']))
@@ -642,6 +655,7 @@ check(job['runs-on']=='ubuntu-24.04' && job['timeout-minutes']==15, 'Bound valid
 steps=job.fetch('steps')
 check(steps.select { |s| s['uses'] }.all? { |s| s['uses'].match?(/@[0-9a-f]{40}$/) && s.dig('with','persist-credentials')==false }, 'Pin actions and never persist write credentials')
 check(steps.last['run'].include?('ruby ops/check.rb') && steps.last['run'].include?('python3 ops/verify-mesh.py --self-test'), 'CI must run the same offline contracts as operators')
+check(steps.last.dig('env', 'GITHUB_TOKEN') == '${{ github.token }}', 'Validation must fetch public GitHub metadata with the read-only job token')
 puts 'Read-only GitOps PR validation workflow: passed'
 ceremony = YAML.safe_load(File.read("#{ROOT}/.github/workflows/ceremony-promote.yaml"))
 workflow_options = ceremony.dig('on', 'workflow_dispatch', 'inputs', 'stage', 'options')
