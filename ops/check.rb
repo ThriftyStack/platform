@@ -21,6 +21,17 @@ end
 def check(value, message)
   raise message unless value
 end
+def pem_certificates(text)
+  text.to_s.scan(/-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----/m).map { |pem| OpenSSL::X509::Certificate.new(pem) }
+end
+def certificate_cn(cert)
+  cert.subject.to_a.assoc('CN')&.at(1)
+end
+def sha256_fingerprint(cert)
+  Digest::SHA256.hexdigest(cert.to_der).upcase.scan(/../).join(':')
+end
+WORKLOAD_ROOT_SHA256 = '1E:F8:37:D0:CD:D9:D4:1E:62:05:76:65:13:30:40:8E:42:2D:B1:01:82:EA:04:2D:43:AC:D1:43:9E:B1:59:25'
+MESH_ROOT_SHA256 = '01:59:5A:02:03:2C:77:6A:4D:AF:8D:B7:84:F1:98:16:D1:CB:4D:66:9A:00:21:25:28:F5:4E:3A:5C:08:8E:45'
 def authentik_restricted_container?(container, uid)
   context = container['securityContext'] || {}
   tmp = (container['volumeMounts'] || []).find { |mount| mount['mountPath']=='/tmp' }
@@ -290,6 +301,35 @@ check(env.any? { |e| e['name']=='ENABLE_CA_SERVER' && e['value']=='false' }, 'Is
 check(istiod.dig('spec','template','spec','volumes').any? { |v| v.dig('secret','secretName')=='istiod-tls' }, 'Istiod must consume istio-csr control-plane certificate')
 issuer = configuration('vault-issuer').find { |o| o['kind']=='Issuer' }
 check(issuer.dig('spec','vault','path')=='pki-management/sign/istio' && issuer.dig('spec','vault','auth','kubernetes','serviceAccountRef','name')=='istio-vault-auth', 'Signer uses constrained intermediate and short-lived SA auth')
+root_cm = configuration('mesh-prerequisites').find { |o| o['kind']=='ConfigMap' && o.dig('metadata','name')=='istio-root-ca' }
+check(root_cm.dig('metadata','namespace')=='cert-manager' && root_cm.dig('metadata','annotations','argocd.argoproj.io/sync-options')=='Prune=false,Delete=false', 'istio-root-ca stays in cert-manager and is not pruned')
+root_pem = root_cm.dig('data','ca.pem').to_s
+check(root_pem.include?('BEGIN CERTIFICATE') && !root_pem.include?('PRIVATE KEY'), 'istio-root-ca is a public bundle')
+roots = pem_certificates(root_pem)
+check(roots.length == 2 && root_pem.scan(/-----BEGIN CERTIFICATE-----/).length == 2, 'istio-root-ca carries the workload root and the mesh root')
+workload_root, mesh_root = roots
+check(certificate_cn(workload_root) == 'ThriftyStack Workload Root 2026' && workload_root.subject.to_s == workload_root.issuer.to_s, 'First trust anchor is the self-signed Workload Root 2026')
+check(sha256_fingerprint(workload_root) == WORKLOAD_ROOT_SHA256, 'Workload root fingerprint drifted')
+check(workload_root.public_key.group.curve_name == 'secp384r1', 'Workload root must stay EC P-384')
+check(certificate_cn(mesh_root) == 'ThriftyStack Mesh Root 2026' && mesh_root.subject.to_s == mesh_root.issuer.to_s, 'Second trust anchor is the self-signed Mesh Root 2026')
+check(sha256_fingerprint(mesh_root) == MESH_ROOT_SHA256, 'Mesh root fingerprint drifted')
+check(mesh_root.not_after.utc.strftime('%Y-%m-%d') == '2036-11-17', 'Mesh root expires on 2036-11-17')
+check(mesh_root.public_key.group.curve_name == 'secp384r1', 'Mesh root must be EC P-384')
+mesh_constraints = mesh_root.extensions.find { |e| e.oid == 'basicConstraints' }
+mesh_names = mesh_root.extensions.find { |e| e.oid == 'nameConstraints' }
+check(mesh_constraints && mesh_constraints.value == 'CA:TRUE, pathlen:1', 'Mesh root path length must be 1')
+check(mesh_names && mesh_names.value.scan(/URI:(\S+)/).flatten.sort == %w[mgmt.thriftystack.internal oci.thriftystack.internal], 'Mesh root URI constraints are the management and OCI trust domains')
+check(!mesh_names.value.match?(/DNS:|IP:|email:/i), 'Mesh root must not permit DNS, IP, or email names')
+pinned_mesh = pem_certificates(File.read("#{ROOT}/infrastructure/configuration/mesh-prerequisites/files/mesh-root-2026.crt"))
+check(pinned_mesh.length == 1 && sha256_fingerprint(pinned_mesh[0]) == MESH_ROOT_SHA256, 'Pinned mesh root file must be the single Mesh Root certificate')
+csr_deploy = csr.find { |o| o['kind']=='Deployment' }
+csr_container = csr_deploy.dig('spec','template','spec','containers').find { |c| c['name']=='cert-manager-istio-csr' }
+csr_mount = csr_container.fetch('volumeMounts').find { |m| m['name']=='root-ca' }
+csr_volume = csr_deploy.dig('spec','template','spec','volumes').find { |v| v['name']=='root-ca' }
+check(csr_container.fetch('args').include?('--root-ca-file=/var/run/istio-csr/ca.pem'), 'istio-csr must verify against the pinned root file')
+check(csr_mount && csr_mount['mountPath']=='/var/run/istio-csr' && csr_mount['readOnly']==true, 'istio-csr mounts the root bundle read-only')
+check(csr_volume.dig('configMap','name')=='istio-root-ca', 'istio-csr root file comes from istio-root-ca')
+check(csr_container.fetch('args').include?('--configmap-namespace-selector=thriftystack.io/mesh=enabled'), 'istio-csr publishes istio-ca-root-cert only to mesh namespaces')
 # Validate native cert-manager fields against the pinned chart CRD too.
 issuer_crd = rendered['cert-manager'].find { |o| o['kind']=='CustomResourceDefinition' && o.dig('spec','names','kind')=='Issuer' }
 validate(issuer['spec'], issuer_crd['spec']['versions'].find { |v| v['name']=='v1' }['schema']['openAPIV3Schema']['properties']['spec'], 'Vault Issuer')

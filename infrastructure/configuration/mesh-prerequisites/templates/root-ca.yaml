@@ -1,3 +1,6 @@
+{{- if not (.Files.Get "files/mesh-root-2026.crt") }}
+{{- fail "pin the public Mesh Root at infrastructure/configuration/mesh-prerequisites/files/mesh-root-2026.crt" }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -23,3 +26,4 @@ data:
     K/rfA2+XSwwCMHrZmpazX/Lxm0oQzk4akQBYp0GZbf8/9gYOOWG65S5X+g0BnO4j
     9y98VtK18ZHMyg==
     -----END CERTIFICATE-----
+{{ .Files.Get "files/mesh-root-2026.crt" | trim | nindent 4 }}
