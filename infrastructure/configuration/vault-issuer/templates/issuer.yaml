@@ -34,6 +34,18 @@ subjects:
 - kind: ServiceAccount
   name: cert-manager
   namespace: cert-manager
+{{- if eq .Values.cluster.id "management" }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oke-vault-listener-ca
+  namespace: istio-system
+type: Opaque
+stringData:
+  ca.crt: |
+{{ required "oke vault listener CA" (.Files.Get "files/oke-vault-listener-ca.crt") | indent 4 }}
+{{- end }}
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer
@@ -42,6 +54,21 @@ metadata:
   namespace: istio-system
 spec:
   vault:
+    {{- if eq .Values.cluster.id "management" }}
+    server: https://vault.devoops.uk
+    path: pki_mesh_mgmt/sign/mesh
+    caBundleSecretRef:
+      name: oke-vault-listener-ca
+      key: ca.crt
+    auth:
+      kubernetes:
+        mountPath: /v1/auth/jwt-management
+        role: istio-system_istio-vault-auth
+        serviceAccountRef:
+          name: istio-vault-auth
+          audiences:
+          - vault://istio-system/vault-istio
+    {{- else }}
     server: {{ .Values.cluster.vaultAddress }}
     path: {{ .Values.cluster.pkiMount }}/sign/istio
     caBundleSecretRef:
@@ -55,3 +82,4 @@ spec:
           name: istio-vault-auth
           audiences:
           - vault://istio-system/vault-istio
+    {{- end }}

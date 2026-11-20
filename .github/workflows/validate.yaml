@@ -37,6 +37,8 @@ jobs:
           printf '%s  %s\n' "$HELM_ARCHIVE_SHA256" "$RUNNER_TEMP/helm.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$(dirname "$(dirname "$HELM")")"
       - name: Verify dependencies and render all deployment stages
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 ops/fetch-dependencies.py "$CHART_CACHE"
