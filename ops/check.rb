@@ -332,12 +332,10 @@ check(root_cm.dig('metadata','namespace')=='cert-manager' && root_cm.dig('metada
 root_pem = root_cm.dig('data','ca.pem').to_s
 check(root_pem.include?('BEGIN CERTIFICATE') && !root_pem.include?('PRIVATE KEY'), 'istio-root-ca is a public bundle')
 roots = pem_certificates(root_pem)
-check(roots.length == 2 && root_pem.scan(/-----BEGIN CERTIFICATE-----/).length == 2, 'istio-root-ca carries the workload root and the mesh root')
-workload_root, mesh_root = roots
-check(certificate_cn(workload_root) == 'ThriftyStack Workload Root 2026' && workload_root.subject.to_s == workload_root.issuer.to_s, 'First trust anchor is the self-signed Workload Root 2026')
-check(sha256_fingerprint(workload_root) == WORKLOAD_ROOT_SHA256, 'Workload root fingerprint drifted')
-check(workload_root.public_key.group.curve_name == 'secp384r1', 'Workload root must stay EC P-384')
-check(certificate_cn(mesh_root) == 'ThriftyStack Mesh Root 2026' && mesh_root.subject.to_s == mesh_root.issuer.to_s, 'Second trust anchor is the self-signed Mesh Root 2026')
+check(roots.length == 1 && root_pem.scan(/-----BEGIN CERTIFICATE-----/).length == 1, 'istio-root-ca carries only the mesh root')
+mesh_root = roots[0]
+check(!root_pem.include?('ThriftyStack Workload Root 2026') && roots.none? { |cert| sha256_fingerprint(cert) == WORKLOAD_ROOT_SHA256 }, 'istio-root-ca must not trust the retired Workload Root')
+check(certificate_cn(mesh_root) == 'ThriftyStack Mesh Root 2026' && mesh_root.subject.to_s == mesh_root.issuer.to_s, 'The trust anchor is the self-signed Mesh Root 2026')
 check(sha256_fingerprint(mesh_root) == MESH_ROOT_SHA256, 'Mesh root fingerprint drifted')
 check(mesh_root.not_after.utc.strftime('%Y-%m-%d') == '2036-11-17', 'Mesh root expires on 2036-11-17')
 check(mesh_root.public_key.group.curve_name == 'secp384r1', 'Mesh root must be EC P-384')

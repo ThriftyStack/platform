@@ -50,7 +50,7 @@ when 'trust'
   mesh_root = "#{ROOT}/infrastructure/configuration/mesh-prerequisites/files/mesh-root-2026.crt"
   dual_trust = File.exist?(mesh_root) || (File.exist?(published) && File.read(published).include?('ThriftyStack Mesh Root 2026'))
   if dual_trust
-    abort 'istio-root-ca already trusts the Mesh Root beside the Workload Root. pki-handoff trust publishes a single workload root and will not replace that bundle.'
+    abort 'istio-root-ca trusts the Mesh Root. pki-handoff trust publishes the workload root and will not replace that bundle.'
   end
   root = ready('secretbackendrootcerts.pki.vault.upbound.io', 'workload-root').fetch('certificate')
   intermediate = ready('secretbackendintermediatesetsigneds.pki.vault.upbound.io', TARGET.fetch('issuerGeneration')).fetch('certificate')
