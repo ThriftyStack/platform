@@ -4,6 +4,7 @@ kind: Namespace
 metadata:
   name: operator-access
   labels:
+    kubernetes.io/metadata.name: operator-access
     istio-injection: disabled
 ---
 apiVersion: v1
@@ -63,6 +64,7 @@ subjects:
   - kind: ServiceAccount
     name: box-reader
     namespace: operator-access
+{{ if .Values.stages.certificates }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -88,6 +90,8 @@ subjects:
   - kind: ServiceAccount
     name: box-reader
     namespace: operator-access
+{{ end }}
+{{ if .Values.stages.qualification }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -118,6 +122,7 @@ subjects:
   - kind: ServiceAccount
     name: box-reader
     namespace: operator-access
+{{ end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -143,3 +148,38 @@ subjects:
   - kind: ServiceAccount
     name: box-reader
     namespace: operator-access
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: box-reader-token-binding
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: operator-access
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["serviceaccounts/token"]
+  validations:
+    - expression: >-
+        request.name != 'box-reader' || (
+          has(object.spec.boundObjectRef) &&
+          object.spec.boundObjectRef.kind == 'Secret' &&
+          object.spec.boundObjectRef.apiVersion == 'v1' &&
+          object.spec.boundObjectRef.name == 'box-reader-anchor' &&
+          has(object.spec.expirationSeconds) &&
+          object.spec.expirationSeconds > 0 &&
+          object.spec.expirationSeconds <= 86400)
+      message: box-reader tokens must bind to box-reader-anchor and expire within 24h.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: box-reader-token-binding
+spec:
+  policyName: box-reader-token-binding
+  validationActions: [Deny]

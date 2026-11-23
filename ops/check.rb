@@ -714,7 +714,20 @@ access_row = catalog.find { |s| s['name']=='operator-access' }
 check(access_row && access_row['stage']=='foundation' && access_row['role']=='management' && access_row['namespace']=='operator-access' && access_row['path']=='infrastructure/configuration/operator-access', 'operator-access is a management foundation Application')
 access_app = by_name.fetch('operator-access')
 check(access_app.dig('spec','project')=='management' && access_app.dig('spec','destination','namespace')=='operator-access', 'operator-access Application stays on the management project')
+check(access_app.dig('spec','source','helm','valueFiles').include?('../../../clusters/management/values.yaml'), 'operator-access reads management stage flags')
 check(access_app.dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i > by_name.fetch('mesh-qualification').dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i, 'operator-access syncs after mesh-test exists')
+token_policy = access.find { |o| o['kind']=='ValidatingAdmissionPolicy' && o.dig('metadata','name')=='box-reader-token-binding' }
+token_expression = token_policy && token_policy.dig('spec','validations',0,'expression').to_s
+check(token_policy && token_policy.dig('spec','failurePolicy')=='Fail', 'box-reader token policy fails closed')
+check(token_expression.include?("object.spec.boundObjectRef.kind == 'Secret'") && token_expression.include?("object.spec.boundObjectRef.name == 'box-reader-anchor'") && token_expression.include?('86400'), 'box-reader tokens must bind to the anchor and expire within 24h')
+token_match = (token_policy.dig('spec','matchConstraints','resourceRules') || []).any? { |rule| (rule['resources'] || []).include?('serviceaccounts/token') && rule['operations']==['CREATE'] }
+check(token_match && token_policy.dig('spec','matchConstraints','namespaceSelector','matchLabels','kubernetes.io/metadata.name')=='operator-access', 'token policy matches TokenRequests in operator-access')
+token_binding = access.find { |o| o['kind']=='ValidatingAdmissionPolicyBinding' && o.dig('metadata','name')=='box-reader-token-binding' }
+check(token_binding && token_binding.dig('spec','policyName')=='box-reader-token-binding' && token_binding.dig('spec','validationActions')==['Deny'], 'token policy denies unbound requests')
+early = render(HELM,'template','operator-access-early',"#{ROOT}/infrastructure/configuration/operator-access")
+check(early.none? { |o| %w[istio-system mesh-test].include?(o.dig('metadata','namespace')) }, 'foundation render does not target istio-system or mesh-test before those stages')
+check(early.any? { |o| o['kind']=='ServiceAccount' && o.dig('metadata','name')=='box-reader' }, 'foundation render still installs box-reader')
+check(early.any? { |o| o['kind']=='Role' && o.dig('metadata','name')=='box-reader-renew' }, 'foundation render still allows renewal')
 puts 'box-reader offline access contract: passed'
 monitoring = rendered.fetch('monitoring')
 agent_role = monitoring.find { |o| o['kind'] == 'ClusterRole' && o.dig('metadata', 'name') == 'management-vmagent' }

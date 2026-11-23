@@ -3,7 +3,10 @@
 The ops box reaches the management API at `https://10.0.10.83:6443` over WARP.
 It uses the `box-reader` ServiceAccount in `operator-access`. Tokens last 24
 hours, are bound to the Secret `box-reader-anchor`, and renew themselves.
-Deleting that Secret revokes every bound token.
+Deleting that Secret revokes every bound token. Admission rejects a
+`box-reader` token that is not bound to that Secret or that lasts longer
+than 24 hours, so a copied renew credential cannot mint a token that
+survives deletion.
 
 ## Setup
 
@@ -31,7 +34,8 @@ file in place.
 
 1. Delete the Secret `operator-access/box-reader-anchor`. Tokens bound to it
    stop working. Argo may recreate an empty Secret; the new object has a new
-   UID, so the previous tokens stay invalid.
+   UID, so the previous tokens stay invalid. A new token must name that
+   Secret and expire within 24 hours, or admission denies it.
 2. Revoke the Access token.
 3. Remove the device.
 
