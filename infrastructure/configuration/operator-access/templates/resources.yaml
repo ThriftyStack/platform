@@ -1,0 +1,145 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: operator-access
+  labels:
+    istio-injection: disabled
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: box-reader
+  namespace: operator-access
+automountServiceAccountToken: false
+---
+# Bound-token anchor. Deleting this Secret revokes every token bound to it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: box-reader-anchor
+  namespace: operator-access
+type: Opaque
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: box-reader
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, configmaps, namespaces, events]
+    verbs: [get, list, watch]
+  - apiGroups: [argoproj.io]
+    resources: [applications, appprojects]
+    verbs: [get, list, watch]
+  - apiGroups: [cert-manager.io]
+    resources: [certificates, issuers, clusterissuers, certificaterequests]
+    verbs: [get, list, watch]
+  - apiGroups: [security.istio.io]
+    resources: [peerauthentications]
+    verbs: [get, list, watch]
+  # Plurals for the pki.vault.upbound.io kinds rendered by vault-pki.
+  - apiGroups: [pki.vault.upbound.io]
+    resources:
+      - secretbackendrootcerts
+      - secretbackendintermediatecertrequests
+      - secretbackendrootsignintermediates
+      - secretbackendintermediatesetsigneds
+      - secretbackendroles
+    verbs: [get, list, watch]
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: box-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: box-reader
+subjects:
+  - kind: ServiceAccount
+    name: box-reader
+    namespace: operator-access
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: box-reader-ca
+  namespace: istio-system
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+    resourceNames: [oke-vault-listener-ca]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: box-reader-ca
+  namespace: istio-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: box-reader-ca
+subjects:
+  - kind: ServiceAccount
+    name: box-reader
+    namespace: operator-access
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: box-reader-exec
+  namespace: mesh-test
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: box-reader-exec
+  namespace: mesh-test
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: box-reader-exec
+subjects:
+  - kind: ServiceAccount
+    name: box-reader
+    namespace: operator-access
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: box-reader-renew
+  namespace: operator-access
+rules:
+  - apiGroups: [""]
+    resources: [serviceaccounts/token]
+    verbs: [create]
+    resourceNames: [box-reader]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: box-reader-renew
+  namespace: operator-access
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: box-reader-renew
+subjects:
+  - kind: ServiceAccount
+    name: box-reader
+    namespace: operator-access

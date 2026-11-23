@@ -98,7 +98,7 @@ stage_flags = Ceremony::PROMOTABLE.flat_map { |s| ['--set', "stages.#{s}=true"] 
 management_docs = render(HELM, 'template', 'management', CHART, *cluster_profile('management'), *stage_flags)
 apps = management_docs.select { |o| o['kind']=='Application' }
 by_name = apps.to_h { |a| [a['metadata']['name'], a] }
-order = %w[longhorn crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik crossplane-authentik cilium-bgp]
+order = %w[longhorn crossplane vault-provider external-secrets reloader vault vault-pki cert-manager mesh-prerequisites vault-issuer cert-manager-istio-csr istio-base istiod mesh-qualification mesh-enrollment authentik crossplane-authentik cilium-bgp operator-access]
 waves = order.map { |name| by_name.fetch(name).dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave').to_i }
 check(waves.each_cons(2).all? { |a,b| a < b }, 'Dependency waves must follow deployment order')
 authentik = by_name.fetch('crossplane-authentik')
@@ -664,6 +664,58 @@ validation = File.read("#{ROOT}/charts/cluster-apps/templates/validation.yaml")
 check(!validation.include?('secrets'), 'validation.yaml must not chain the secrets stage')
 check(!validation.include?('bgp'), 'validation.yaml must not chain the bgp stage')
 
+access = rendered.fetch('operator-access')
+sa = access.find { |o| o['kind']=='ServiceAccount' && o.dig('metadata','name')=='box-reader' }
+check(sa && sa.dig('metadata','namespace')=='operator-access' && sa['automountServiceAccountToken']==false, 'box-reader does not automount a token')
+anchor = access.find { |o| o['kind']=='Secret' }
+check(anchor && access.count { |o| o['kind']=='Secret' }==1, 'operator-access renders one Secret')
+check(anchor.dig('metadata','name')=='box-reader-anchor' && anchor.dig('metadata','namespace')=='operator-access' && anchor['type']=='Opaque', 'box-reader-anchor is an Opaque Secret')
+check(!anchor.key?('data') && !anchor.key?('stringData'), 'box-reader-anchor is empty')
+check(access.none? { |o| o['kind']=='Secret' && (o['type']=='kubernetes.io/service-account-token' || (o.dig('metadata','annotations') || {}).key?('kubernetes.io/service-account.name')) }, 'no long-lived ServiceAccount token Secret')
+boxed = access.select { |o| %w[Role ClusterRole].include?(o['kind']) }.flat_map { |o| (o['rules'] || []).map { |rule| [o, rule] } }
+wildcard = ->(rule) { (rule['verbs'] || []).include?('*') || (rule['resources'] || []).include?('*') || (rule['apiGroups'] || []).include?('*') || (rule['resourceNames'] || []).include?('*') || (rule['nonResourceURLs'] || []).include?('*') }
+check(boxed.none? { |_, rule| wildcard.call(rule) }, 'box-reader rules have no wildcard verbs or resources')
+secret_rules = boxed.select { |_, rule| (rule['resources'] || []).any? { |resource| resource == 'secrets' || resource.start_with?('secrets/') } }
+check(secret_rules.length == 1, 'exactly one secrets rule')
+secret_role, secret_rule = secret_rules[0]
+check(secret_role['kind']=='Role' && secret_role.dig('metadata','namespace')=='istio-system' && secret_role.dig('metadata','name')=='box-reader-ca', 'the secrets rule is istio-system/box-reader-ca')
+check(secret_rule['verbs']==['get'] && secret_rule['resources']==['secrets'] && secret_rule['resourceNames']==['oke-vault-listener-ca'] && secret_rule['apiGroups']==[''], 'CA secret access is get by resource name')
+exec_rules = boxed.select { |_, rule| (rule['resources'] || []).any? { |resource| resource == 'pods/exec' || resource.end_with?('/exec') } }
+check(exec_rules.length == 1, 'exec is granted once')
+exec_role, exec_rule = exec_rules[0]
+check(exec_role['kind']=='Role' && exec_role.dig('metadata','namespace')=='mesh-test' && exec_role.dig('metadata','name')=='box-reader-exec', 'exec only in mesh-test')
+check(exec_rule['verbs']==['create'] && exec_rule['resources']==['pods/exec'], 'exec is create on pods/exec')
+token_rules = boxed.select { |_, rule| (rule['resources'] || []).include?('serviceaccounts/token') }
+check(token_rules.length == 1, 'token create is granted once')
+token_role, token_rule = token_rules[0]
+check(token_role['kind']=='Role' && token_role.dig('metadata','namespace')=='operator-access' && token_role.dig('metadata','name')=='box-reader-renew', 'token create stays in operator-access')
+check(token_rule['verbs']==['create'] && token_rule['resources']==['serviceaccounts/token'] && token_rule['resourceNames']==['box-reader'], 'token create is limited to box-reader')
+sar_rules = boxed.select { |_, rule| (rule['resources'] || []).include?('subjectaccessreviews') }
+check(sar_rules.length == 1 && sar_rules[0][0]['kind']=='ClusterRole' && sar_rules[0][1]['verbs']==['create'] && sar_rules[0][1]['apiGroups']==['authorization.k8s.io'], 'ClusterRole can create SubjectAccessReviews')
+pki_kinds = rendered.fetch('vault-pki').select { |o| o['apiVersion'].to_s.start_with?('pki.vault.upbound.io/') }.map { |o| o['kind'] }.uniq.sort
+pki_resources = pki_kinds.map do |kind|
+  crd = schemas.find { |s| s.dig('spec','group')=='pki.vault.upbound.io' && s.dig('spec','names','kind')==kind }
+  check(crd && crd.dig('spec','names','plural'), "Missing official plural for pki.vault.upbound.io/#{kind}")
+  crd.dig('spec','names','plural')
+end.sort
+pki_rules = boxed.select { |role, rule| role['kind']=='ClusterRole' && rule['apiGroups']==['pki.vault.upbound.io'] }
+check(pki_rules.length == 1 && pki_rules[0][1]['verbs']==%w[get list watch] && pki_rules[0][1]['resources'].sort==pki_resources, 'box-reader reads exactly the rendered pki.vault.upbound.io kinds')
+check(pki_resources.length == 5, 'management vault-pki renders five pki.vault.upbound.io kinds')
+bindings = access.select { |o| %w[RoleBinding ClusterRoleBinding].include?(o['kind']) }
+check(bindings.length == 4 && bindings.count { |o| o['kind']=='ClusterRoleBinding' }==1, 'box-reader has one ClusterRoleBinding and three RoleBindings')
+check(bindings.all? { |o| o['subjects']==[{'kind'=>'ServiceAccount','name'=>'box-reader','namespace'=>'operator-access'}] }, 'bindings target the box-reader ServiceAccount')
+namespace = access.find { |o| o['kind']=='Namespace' && o.dig('metadata','name')=='operator-access' }
+check(namespace && namespace.dig('metadata','labels','istio-injection')=='disabled', 'operator-access namespace disables injection')
+%w[operator-access istio-system mesh-test].each do |destination|
+  check(project_namespaces.include?(destination), "Management project must allow #{destination}")
+end
+check(allow.include?(['', 'Namespace']) && allow.include?(['rbac.authorization.k8s.io', 'ClusterRole']) && allow.include?(['rbac.authorization.k8s.io', 'ClusterRoleBinding']), 'Management project allows the operator-access cluster kinds')
+access_row = catalog.find { |s| s['name']=='operator-access' }
+check(access_row && access_row['stage']=='foundation' && access_row['role']=='management' && access_row['namespace']=='operator-access' && access_row['path']=='infrastructure/configuration/operator-access', 'operator-access is a management foundation Application')
+access_app = by_name.fetch('operator-access')
+check(access_app.dig('spec','project')=='management' && access_app.dig('spec','destination','namespace')=='operator-access', 'operator-access Application stays on the management project')
+check(access_app.dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i > by_name.fetch('mesh-qualification').dig('metadata','annotations','argocd.argoproj.io/sync-wave').to_i, 'operator-access syncs after mesh-test exists')
+puts 'box-reader offline access contract: passed'
 monitoring = rendered.fetch('monitoring')
 agent_role = monitoring.find { |o| o['kind'] == 'ClusterRole' && o.dig('metadata', 'name') == 'management-vmagent' }
 check(agent_role && agent_role.fetch('rules').none? { |rule| (rule['resources'] || []).any? { |r| ['secrets', 'nodes/proxy', '*'].include?(r) } }, 'Management metrics must not grant secrets or kubelet proxy access')

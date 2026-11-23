@@ -221,3 +221,11 @@ services:
       pod-security.kubernetes.io/enforce: privileged
       pod-security.kubernetes.io/audit: restricted
       pod-security.kubernetes.io/warn: restricted
+  # Roles in istio-system and mesh-test apply after those namespaces exist.
+  - name: operator-access
+    releaseName: operator-access
+    stage: foundation
+    role: management
+    wave: "96"
+    path: infrastructure/configuration/operator-access
+    namespace: operator-access

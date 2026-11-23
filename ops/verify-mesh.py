@@ -37,6 +37,35 @@ def chain_from_response(response):
             return chain.get('inlineString', chain.get('inline_string'))
     raise ValueError('No active workload certificate chain')
 
+MESH_CLIENT_USER = 'system:serviceaccount:mesh-test:client'
+MESH_CLIENT_GROUPS = [
+    'system:serviceaccounts',
+    'system:serviceaccounts:mesh-test',
+    'system:authenticated',
+]
+
+def mesh_client_certificate_review():
+    """SubjectAccessReview for the mesh client creating cert-manager CertificateRequests."""
+    return {
+        'apiVersion': 'authorization.k8s.io/v1',
+        'kind': 'SubjectAccessReview',
+        'spec': {
+            'user': MESH_CLIENT_USER,
+            'groups': list(MESH_CLIENT_GROUPS),
+            'resourceAttributes': {
+                'namespace': 'istio-system',
+                'verb': 'create',
+                'group': 'cert-manager.io',
+                'resource': 'certificaterequests',
+            },
+        },
+    }
+
+def workload_identity_denied(status):
+    if not isinstance(status, dict) or status.get('evaluationError'):
+        return False
+    return status.get('allowed') is False
+
 def enrolled(pod_spec):
     # Istio 1.30+ may inject istio-proxy as a native sidecar initContainer.
     container_names = [c['name'] for c in pod_spec.get('containers', [])]
@@ -109,6 +138,16 @@ def self_test():
         pass
     else:
         raise AssertionError('Missing workload chain must fail')
+    review = mesh_client_certificate_review()
+    attrs = review['spec']['resourceAttributes']
+    assert review['spec']['user'] == 'system:serviceaccount:mesh-test:client'
+    assert review['spec']['groups'] == ['system:serviceaccounts', 'system:serviceaccounts:mesh-test', 'system:authenticated']
+    assert attrs == {'namespace': 'istio-system', 'verb': 'create', 'group': 'cert-manager.io', 'resource': 'certificaterequests'}
+    assert workload_identity_denied({'allowed': False})
+    assert not workload_identity_denied({'allowed': True})
+    assert not workload_identity_denied({'allowed': False, 'evaluationError': 'review failed'})
+    assert not workload_identity_denied({})
+    print('SubjectAccessReview shape: passed')
     assert enrolled({'containers': [{'name': 'istio-proxy'}], 'initContainers': []})
     assert enrolled({'containers': [{'name': 'client'}], 'initContainers': [{'name': 'istio-proxy', 'restartPolicy': 'Always'}]})
     assert not enrolled({'containers': [{'name': 'client'}], 'initContainers': [{'name': 'istio-init'}]})
@@ -151,8 +190,15 @@ def main():
         labels = namespaces.get(namespace, {}).get('metadata', {}).get('labels', {})
         if labels.get('istio-injection') == 'enabled' or labels.get('istio.io/dataplane-mode') == 'ambient' or 'istio.io/rev' in labels:
             raise ValueError(f'{namespace} must remain excluded from enrollment')
-    denied = subprocess.run(command('kubectl', 'auth', 'can-i', 'create', 'certificaterequests.cert-manager.io', '-n', 'istio-system', '--as=system:serviceaccount:mesh-test:client'), capture_output=True, text=True)
-    if denied.returncode != 1 or denied.stdout.strip() != 'no':
+    review = mesh_client_certificate_review()
+    created = subprocess.run(command('kubectl', 'create', '-f', '-', '-o', 'json'), input=json.dumps(review), capture_output=True, text=True)
+    if created.returncode != 0:
+        raise ValueError('Workload can request identities directly, or RBAC check failed')
+    try:
+        body = json.loads(created.stdout)
+    except json.JSONDecodeError:
+        raise ValueError('Workload can request identities directly, or RBAC check failed')
+    if not workload_identity_denied(body.get('status')):
         raise ValueError('Workload can request identities directly, or RBAC check failed')
     first = certificate(pod, root); traffic(args.permissive)
     root_hash = hashlib.sha256(root.encode()).hexdigest()

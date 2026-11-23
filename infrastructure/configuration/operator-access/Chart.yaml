@@ -1,0 +1,5 @@
+---
+apiVersion: v2
+name: thrifty-operator-access
+description: Read-only management access for the ops box
+version: 1.0.0
