@@ -1,0 +1,5 @@
+# Cross-namespace Roles render only after the stage that creates the namespace.
+# The management Application passes clusters/<id>/values.yaml, which turns these on.
+stages:
+  certificates: false
+  qualification: false
